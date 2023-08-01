@@ -1,0 +1,15 @@
+# This file defines charm config options, and populates the Configure tab on Charmhub.
+# If your charm does not require configuration options, delete this file entirely.
+#
+# See https://juju.is/docs/config for guidance.
+
+options:
+  email:
+    description: |
+      Configures the email used for registering with the certificate provider.
+
+      REQUIRED
+
+    default: ""
+    type: string
+    

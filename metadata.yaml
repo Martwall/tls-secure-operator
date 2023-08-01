@@ -1,0 +1,27 @@
+# This file populates the Overview on Charmhub.
+# See https://juju.is/docs/sdk/metadata-reference for a checklist and guidance.
+
+# The charm package name, no spaces (required)
+# See https://juju.is/docs/sdk/naming#heading--naming-charms for guidance.
+name: acmesh-operator
+ 
+# The following metadata are human-readable and will be published prominently on Charmhub.
+
+# (Recommended)
+display-name: acme.sh
+
+# (Required)
+summary: acme.sh - An ACME protocol client 
+
+description: |
+  An ACME protocol client.
+
+  Full ACME protocol implementation.
+
+  Provides TLS certificates through a stand alone webserver and the tls-certificates interface.
+
+  Charms needing signed TLS certificates.
+
+provides:
+  signedcertificates:
+    interface: tls-certificates
