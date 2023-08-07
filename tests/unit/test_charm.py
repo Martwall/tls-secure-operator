@@ -22,7 +22,6 @@ TEMPORARY_DIR_TEST_PATH = "./tests/unit/tmp-test"
 
 lxc = Lxc(LXC_TEST_INSTANCE_NAME)
 
-
 class TestCharm(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -31,19 +30,6 @@ class TestCharm(unittest.TestCase):
         if not exists(TEMPORARY_DIR_TEST_PATH):
             mkdir(TEMPORARY_DIR_TEST_PATH)
         lxc.initialize()
-        # try:
-        #     check_output(
-        #         ["lxc", "start", LXC_TEST_INSTANCE_NAME],
-        #         stderr=STDOUT,
-        #         universal_newlines=True,
-        #     )
-        # except CalledProcessError as error:
-        #     logger.error(error.output)
-        #     if str(error.output).find("not found"):
-        #         check_call(["lxc", "launch", "images:ubuntu/22.04", LXC_TEST_INSTANCE_NAME])
-        #     else:
-        #         raise error
-        # Assuming that the instance cannot be found
 
     def setUp(self):
         self.harness = ops.testing.Harness(AcmeshOperatorCharm)
@@ -72,6 +58,10 @@ class TestCharm(unittest.TestCase):
             content = file.read()
             self.assertEqual(content, file_content)
         self.assertTrue(exists(file_path))
+
+    def test_domain_from_csr(self):
+        csr = lxc.generate_csr()
+        self.harness.charm._domain_from_csr(csr)
 
     @classmethod
     def cleanup_tmp_dir(cls) -> None:

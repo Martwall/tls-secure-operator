@@ -1,0 +1,9 @@
+[Unit]
+Description=Pebble test ACME server
+
+[Service]
+Type=simple 
+ExecStart=/root/go/bin/pebble -config /root/acmesh-operator-pebble-config.json
+
+[Install]
+WantedBy=multi-user.target
