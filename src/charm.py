@@ -97,7 +97,7 @@ class AcmeshOperatorCharm(CharmBase):
     def _domain_from_csr(self, csr: str) -> str:
         domain: str | None = None
         try:
-            csr_file_path = self._temporarily_save_csr(csr)
+            csr_file_path = self._temporarily_save_file(content=csr, file_ending="csr")
             domain = check_output(
                 [
                     "acme.sh",
