@@ -1,3 +1,5 @@
 ops >= 2.2.0
 jsonschema
 cryptography
+pylxd
+urllib3 < 2

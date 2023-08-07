@@ -12,4 +12,16 @@ options:
 
     default: ""
     type: string
+
+  server:
+    description: |
+      Configures the ACME server directory URL.
+
+      Please see some supported here https://github.com/acmesh-official/acme.sh/wiki/Server
+      Any other RFC8555-compliant CA should also be supported.
+
+      The default CA is zerossl.
+
+    default: "zerossl"
+    type: string
     
