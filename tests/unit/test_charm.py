@@ -12,7 +12,6 @@ from shutil import rmtree
 import ops
 import ops.testing
 from charm import AcmeshOperatorCharm
-from lxc_setup import Lxc
 
 logger = logging.getLogger(__name__)
 
@@ -20,22 +19,19 @@ logger = logging.getLogger(__name__)
 LXC_TEST_INSTANCE_NAME = "test-acmesh-operator-UStJX1kdja3n0qoRlKWzog"
 TEMPORARY_DIR_TEST_PATH = "./tests/unit/tmp-test"
 
-lxc = Lxc(LXC_TEST_INSTANCE_NAME)
 
 class TestCharm(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        cls.addClassCleanup(cls.cleanup_lxc_instance)
         cls.addClassCleanup(cls.cleanup_tmp_dir)
         if not exists(TEMPORARY_DIR_TEST_PATH):
             mkdir(TEMPORARY_DIR_TEST_PATH)
-        lxc.initialize()
 
     def setUp(self):
         self.harness = ops.testing.Harness(AcmeshOperatorCharm)
         self.addCleanup(self.harness.cleanup)
         self.harness.begin()
-        self.harness.charm.TEMPORARY_DIR_PATH = TEMPORARY_DIR_TEST_PATH
+        # self.harness.charm.TEMPORARY_DIR_PATH = TEMPORARY_DIR_TEST_PATH
 
     def test_config_changed_valid(self):
         # Trigger a config-changed event with an updated value
@@ -60,14 +56,15 @@ class TestCharm(unittest.TestCase):
         self.assertTrue(exists(file_path))
 
     def test_domain_from_csr(self):
-        csr = lxc.generate_csr()
-        self.harness.charm._domain_from_csr(csr)
+        # Created in lxc container
+        csr = ""
+        with open("/root/server.csr") as csr_file:
+            csr = csr_file.read()
+        domain = self.harness.charm._domain_from_csr(csr)
+        # AcmeshOperatorCharm._domain_from_csr(self.harness.charm, csr)
+        self.assertEqual(domain, "localhost")
 
     @classmethod
     def cleanup_tmp_dir(cls) -> None:
         if exists(TEMPORARY_DIR_TEST_PATH):
             rmtree(TEMPORARY_DIR_TEST_PATH)
-
-    @classmethod
-    def cleanup_lxc_instance(cls) -> None:
-        lxc.cleanup()

@@ -45,6 +45,7 @@ htmlcov/
 .cache
 nosetests.xml
 coverage.xml
+coverage.json
 *.cover
 *.py,cover
 .hypothesis/
@@ -124,6 +125,7 @@ celerybeat.pid
 .venv
 env/
 venv/
+venv-remote/
 ENV/
 env.bak/
 venv.bak/
@@ -161,3 +163,4 @@ cython_debug/
 
 # Charms
 *.charm
+.ruff_cache

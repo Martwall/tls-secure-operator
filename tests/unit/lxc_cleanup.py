@@ -5,4 +5,4 @@ from lxc import LXC_INSTANCE_NAME, Lxc
 
 if __name__ == "__main__":
     lxc = Lxc(LXC_INSTANCE_NAME)
-    lxc.initialize(override_install_check=False)
+    lxc.cleanup()

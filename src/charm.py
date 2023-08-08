@@ -9,7 +9,7 @@ import logging
 from os import remove
 from os.path import exists
 from secrets import token_urlsafe
-from subprocess import CalledProcessError, check_call, check_output
+from subprocess import PIPE, CalledProcessError, Popen, check_call
 from typing import TypedDict
 
 from ops.charm import CharmBase, ConfigChangedEvent, InstallEvent
@@ -98,18 +98,16 @@ class AcmeshOperatorCharm(CharmBase):
         domain: str | None = None
         try:
             csr_file_path = self._temporarily_save_file(content=csr, file_ending="csr")
-            domain = check_output(
-                [
-                    "acme.sh",
-                    "--showcsr",
-                    "--csr",
-                    csr_file_path,
-                    "|",
-                    "awk",
-                    "'BEGIN{FS='" "=" "'} NR==1 { print $2 }'",
-                ],
-                text=True,
+            acme_out = Popen(
+                ["/root/.acme.sh/acme.sh", "--showcsr", "--csr", csr_file_path], stdout=PIPE
             )
+            domain_capture = Popen(
+                ["awk", 'BEGIN{FS="="} NR==1 { print $2 }'],
+                stdin=acme_out.stdout,
+                stdout=PIPE,
+            )
+            domain = domain_capture.communicate()[0].decode("utf-8").removesuffix("\n")
+            
         except CalledProcessError as e:
             logger.error(e)
         finally:
