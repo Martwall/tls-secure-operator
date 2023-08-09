@@ -9,8 +9,9 @@ import logging
 from os import remove
 from os.path import exists
 from secrets import token_urlsafe
-from subprocess import PIPE, CalledProcessError, Popen, check_call
+from subprocess import CalledProcessError, check_call, check_output
 from typing import TypedDict
+from urllib.parse import urlparse
 
 from ops.charm import CharmBase, ConfigChangedEvent, InstallEvent
 from ops.main import main
@@ -39,6 +40,7 @@ class AcmeshOperatorCharm(CharmBase):
 
     TEMPORARY_DIR_PATH = "/tmp"
     HTTPPORT = "88"  # Httpport for acme.sh standalone server
+    _ACMESH_PATH = "/root/.acme.sh/acme.sh"
 
     def __init__(self, *args):
         super().__init__(*args)
@@ -83,31 +85,56 @@ class AcmeshOperatorCharm(CharmBase):
         try:
             self._validate_email()
             logger.debug("email updated")
+            self._validate_server(server=self.model.config["server"].lower())
+            logger.debug("server updated")
             self.unit.status = ActiveStatus()
         except ValueError as error:
             logger.error(error)
             self.unit.status = BlockedStatus(str(error))
 
     def _validate_email(self) -> str:
+        """Validate the email address."""
         email = self.model.config["email"].lower()
         if not email:
             raise ValueError("Email cannot be empty")
         return email
 
+    def _validate_server(self, server: str) -> str:
+        """Validate the server."""
+        known_cas = [
+            "letsencrypt",
+            "letsencrypt_test",
+            "buypass",
+            "buypass_test",
+            "zerossl",
+            "sslcom",
+            "google",
+            "googletest",
+        ]
+        if not server:
+            raise ValueError("Server cannot be empty")
+        if server in known_cas:
+            return server
+        parse_result = urlparse(server)
+        # Check that there is a valid scheme and domain
+        if not all([parse_result.scheme, parse_result.netloc]):
+            raise ValueError("Server url malformed")
+        if parse_result.scheme != "https":
+            raise ValueError("Server needs to be secured with https")
+        return server
+
     def _domain_from_csr(self, csr: str) -> str:
         domain: str | None = None
         try:
             csr_file_path = self._temporarily_save_file(content=csr, file_ending="csr")
-            acme_out = Popen(
-                ["/root/.acme.sh/acme.sh", "--showcsr", "--csr", csr_file_path], stdout=PIPE
+            acme_out = check_output(
+                [self.acmesh_path, "--showcsr", "--csr", csr_file_path], text=True
             )
-            domain_capture = Popen(
-                ["awk", 'BEGIN{FS="="} NR==1 { print $2 }'],
-                stdin=acme_out.stdout,
-                stdout=PIPE,
+
+            domain_out = check_output(
+                ["awk", 'BEGIN{FS="="} NR==1 { print $2 }'], input=acme_out, text=True
             )
-            domain = domain_capture.communicate()[0].decode("utf-8").removesuffix("\n")
-            
+            domain = domain_out.removesuffix("\n")
         except CalledProcessError as e:
             logger.error(e)
         finally:
@@ -133,26 +160,28 @@ class AcmeshOperatorCharm(CharmBase):
 
     def _certificate_from_csr(self, csr: str) -> None:
         """Use acme.sh to get a certificate based on a csr."""
-        csr_file_path: str | None = None
+        csr_file_path = self._temporarily_save_file(content=csr, file_ending="csr")
         try:
-            csr_file_path = self._temporarily_save_file(content=csr, file_ending="csr")
             check_call(
                 [
-                    "acme.sh",
+                    self.acmesh_path,
                     "--signcsr",
                     "--csr",
                     csr_file_path,
                     "--standalone",
                     "--httpport",
                     self.HTTPPORT,
+                    "--server",
+                    self.model.config["server"].lower(),
                 ]
             )
-        except Exception as e:
-            if csr_file_path and exists(csr_file_path):
+        except CalledProcessError as e:
+            logger.error(e)
+            if exists(csr_file_path):
                 remove(csr_file_path)
             raise e
         finally:
-            if csr_file_path and exists(csr_file_path):
+            if exists(csr_file_path):
                 remove(csr_file_path)
 
     def _issue_certificate_from_csr(self, csr: str) -> NewCertificateResponse:
@@ -170,7 +199,7 @@ class AcmeshOperatorCharm(CharmBase):
             fullchain_file_path = self._temporarily_save_file(content="", file_ending="fullchain")
             check_call(
                 [
-                    "acme.sh",
+                    self.acmesh_path,
                     "--install-cert",
                     "-d",
                     domain,
@@ -194,6 +223,7 @@ class AcmeshOperatorCharm(CharmBase):
         except CalledProcessError as e:
             logger.error(e)
             self.unit.status = ErrorStatus("Could not sign certificate from csr.")
+            raise e
         finally:
             file_paths_to_remove = [crt_file_path, fullchain_file_path, ca_file_path]
             for path_to_remove in file_paths_to_remove:
@@ -218,7 +248,7 @@ class AcmeshOperatorCharm(CharmBase):
         """Revoke a certificate."""
         try:
             domain = self._domain_from_csr(csr)
-            check_call(["acme.sh", "--revoke", "-d", domain])
+            check_call([self.acmesh_path, "--revoke", "-d", domain])
         except CalledProcessError as e:
             logger.error(e)
             self.unit.status = ErrorStatus("Could not revoke certificate")
@@ -230,6 +260,11 @@ class AcmeshOperatorCharm(CharmBase):
         self._revoke_certificate(
             csr=event.certificate_signing_request, certificate=event.certificate
         )
+
+    @property
+    def acmesh_path(self) -> str:
+        """The path to the acme.sh script."""
+        return self._ACMESH_PATH
 
 
 if __name__ == "__main__":

@@ -10,15 +10,13 @@ from pylxd.models import Instance
 
 logger = logging.getLogger(__name__)
 
-LXC_INSTANCE_NAME = "test-invoke-12345679"
-
 
 # TODO: There is no crontab for root
 class Lxc:
     CERTIFICATE_CN = "localhost"
     SOURCE_INSTANCE_MOUNT_PATH = "/root/acmesh-operator"
 
-    def __init__(self, instance_name: str) -> None:
+    def __init__(self, instance_name="test-invoke-12345679") -> None:
         self.instance_name = instance_name
         self.client = Client()
         self._instance = None
@@ -50,9 +48,10 @@ class Lxc:
             raise RuntimeError("Could not get network address for lxc instance.")
 
     def cleanup(self) -> None:
-        # time.sleep(1)  # Seems like lxd cannot handle calls that are too close together
-        self.instance.stop(timeout=60, wait=True)
+        self._uninstall_acmesh()
+        # self.instance.stop(timeout=60, wait=True)
         # self._unmount_source_directory()
+        pass
 
     def initialize(self, override_install_check=False) -> None:
         if not self.client.instances.exists(self.instance_name):
@@ -72,6 +71,8 @@ class Lxc:
             pebble_exit_code = self.start_pebble()
             if pebble_exit_code:
                 raise RuntimeError(f"Pebble exited with exit code {pebble_exit_code}")
+        # Reinstall acme.sh on each install
+        self._install_acmesh()
 
     def start_pebble(self) -> int:
         with open(f"{os.getcwd()}/tests/unit/pebble-config.json", "r") as config_file:
@@ -102,13 +103,6 @@ class Lxc:
             logger.info(f"result: {result.exit_code}")
             logger.info(f"stdout: {result.stdout}")
             logger.info(f"stderr: {result.stderr}")
-
-        acmesh_install_result = self.instance.execute(
-            ["./acme.sh", "--install", "-m", "my@example.com"], cwd="/root/acme.sh"
-        )
-        logger.info(f"result: {acmesh_install_result.exit_code}")
-        logger.info(f"stdout: {acmesh_install_result.stdout}")
-        logger.info(f"stderr: {acmesh_install_result.stderr}")
 
         pebble_install_result = self.instance.execute(
             ["go", "install", "./cmd/pebble"], cwd="/root/pebble"
@@ -146,8 +140,14 @@ class Lxc:
         # Pebble server certificates
         minica_cert_name = "pebble.minica.pem.crt"
         # TODO check if already exiting in /etc/ca-certificates.conf. Perhaps use Grep and exit code of 0
+        ca_certificates_conf: bytes = self.instance.files.get("/etc/ca-certificates.conf")
+        if minica_cert_name not in ca_certificates_conf.decode():
+            ca_certificates_conf_new = ca_certificates_conf.decode() + minica_cert_name + "\n"
+            self.instance.files.put(
+                "/etc/ca-certificates.conf", ca_certificates_conf_new.encode("utf-8")
+            )
+
         install_cert_commands = [
-            ["echo", minica_cert_name, ">>", "/etc/ca-certificates.conf"],
             ["cp", "pebble.minica.pem", f"/usr/share/ca-certificates/{minica_cert_name}"],
             ["update-ca-certificates"],
         ]
@@ -174,6 +174,26 @@ class Lxc:
             logger.info(f"result: {result.exit_code}")
             logger.info(f"stdout: {result.stdout}")
             logger.info(f"stderr: {result.stderr}")
+
+    def _install_acmesh(self) -> None:
+        commands = [["./acme.sh", "--install", "-m", "example_mail@example.com"]]
+        for command in commands:
+            result = self.instance.execute(command, cwd="/root/acme.sh")
+            logger.info(f"result: {result.exit_code}")
+            logger.info(f"stdout: {result.stdout}")
+            logger.info(f"stderr: {result.stderr}")
+
+    def _uninstall_acmesh(self) -> None:
+        commands = [["./acme.sh", "--uninstall"], ["rm", "-R", "/root/.acme.sh"]]
+        for command in commands:
+            result = self.instance.execute(command, cwd="/root/acme.sh")
+            logger.info(f"result: {result.exit_code}")
+            logger.info(f"stdout: {result.stdout}")
+            logger.info(f"stderr: {result.stderr}")
+
+    def reinstall_acmesh(self) -> None:
+        self._uninstall_acmesh()
+        self._install_acmesh()
 
     def _mount_source_directory(self) -> None:
         path = self._find_acmesh_operator_dir()
@@ -223,7 +243,7 @@ class Lxc:
                 "-subj",
                 f"/C=AU/ST=devState/L=Dev/O=devComp/OU=dev/CN={self.CERTIFICATE_CN}",
                 "-addext",
-                "subjectAltName = DNS:foo.bar",
+                "subjectAltName = DNS:localhost",
             ],
             cwd="/root",
         )
