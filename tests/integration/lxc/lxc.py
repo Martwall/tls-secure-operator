@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 
 
 # TODO: There is no crontab for root
+# TODO: Detect environment: https://github.com/canonical/lxd/issues/5923
 class Lxc:
     CERTIFICATE_CN = "localhost"
     SOURCE_INSTANCE_MOUNT_PATH = "/root/acmesh-operator"
@@ -75,7 +76,7 @@ class Lxc:
         self._install_acmesh()
 
     def start_pebble(self) -> int:
-        with open(f"{os.getcwd()}/tests/unit/pebble-config.json", "r") as config_file:
+        with open(f"{os.getcwd()}/tests/integration/lxc/pebble-config.json", "r") as config_file:
             config = config_file.read()
             self.instance.files.put("/root/acmesh-operator-pebble-config.json", data=config)
         result = self.instance.execute(
@@ -112,7 +113,7 @@ class Lxc:
         logger.info(f"stderr: {pebble_install_result.stderr}")
         # Pebble service
 
-        with open(f"{os.getcwd()}/tests/unit/pebble.service", "r") as systemd_file:
+        with open(f"{os.getcwd()}/tests/integration/lxc/pebble.service", "r") as systemd_file:
             service = systemd_file.read()
             self.instance.files.put("/etc/systemd/system/pebble.service", data=service, mode=644)
             self.instance.execute(["systemctl", "daemon-reload"])

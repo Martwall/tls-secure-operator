@@ -4,11 +4,24 @@
 # See https://juju.is/docs/config for guidance.
 
 options:
+  use-email:
+    description: |
+      A boolean value indicating if you want to use an email for expiry notifications (see email config option).
+
+      If this is set to true and there is no email configured the charm will wait for an email to
+      be set in the config before issuing a certificate. If set to false, no email is required to start
+      issuing certificates.
+
+    default: true
+    type: boolean
+
   email:
     description: |
       Configures the email used for registering with the certificate provider.
 
-      REQUIRED
+      This is the email to which you will get certificate expiring notices and if you have
+      registered with a provider it is the account email. Please also see the use-email config
+      option.
 
     default: ""
     type: string
@@ -21,6 +34,8 @@ options:
       Any other RFC8555-compliant CA should also be supported.
 
       The default CA is zerossl.
+
+      REQUIRED
 
     default: "zerossl"
     type: string

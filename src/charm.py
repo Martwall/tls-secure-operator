@@ -6,13 +6,15 @@
 """This is a docstring."""
 
 import logging
-from os import remove
+from os import environ, path, remove
 from os.path import exists
+from re import compile, fullmatch
 from secrets import token_urlsafe
 from subprocess import CalledProcessError, check_call, check_output
 from typing import TypedDict
 from urllib.parse import urlparse
 
+import pem
 from ops.charm import CharmBase, ConfigChangedEvent, InstallEvent
 from ops.main import main
 from ops.model import ActiveStatus, BlockedStatus, ErrorStatus, MaintenanceStatus
@@ -26,13 +28,25 @@ from lib.charms.tls_certificates_interface.v2.tls_certificates import (
 # Log messages can be retrieved using juju debug-log
 logger = logging.getLogger(__name__)
 
+KNOWN_CAS = {
+    "letsencrypt": "https://acme-v02.api.letsencrypt.org/directory",
+    "letsencrypt_test": "https://acme-staging-v02.api.letsencrypt.org/directory",
+    "buypass": "https://api.buypass.com/acme/directory",
+    "buypass_test": "https://api.test4.buypass.no/acme/directory",
+    "zerossl": "https://acme.zerossl.com/v2/DV90",
+    "sslcom_rsa": "https://acme.ssl.com/sslcom-dv-rsa",
+    "sslcom_ecc": "https://acme.ssl.com/sslcom-dv-ecc",
+    "google": "https://dv.acme-v02.api.pki.goog/directory",
+    "googletest": "https://dv.acme-v02.test-api.pki.goog/directory",
+}
+
 
 class NewCertificateResponse(TypedDict):
     """Typed dict for return from issuing a new certificate."""
 
     certificate: str
     ca: str
-    fullchain: str
+    fullchain: list[str]
 
 
 class AcmeshOperatorCharm(CharmBase):
@@ -40,7 +54,7 @@ class AcmeshOperatorCharm(CharmBase):
 
     TEMPORARY_DIR_PATH = "/tmp"
     HTTPPORT = "88"  # Httpport for acme.sh standalone server
-    _ACMESH_PATH = "/root/.acme.sh/acme.sh"
+    _ACMESH_INSTALL_DIR = environ.get("JUJU_CHARM_DIR")
 
     def __init__(self, *args):
         super().__init__(*args)
@@ -60,21 +74,25 @@ class AcmeshOperatorCharm(CharmBase):
         logger.info("Installing acme.sh")
         self.unit.status = MaintenanceStatus("Installing acme.sh")
         try:
-            email = self._validate_email()
-            check_call(["apt", "install", "-y", "curl"])
-            # required by acme.sh to run standalone
-            check_call(["apt", "install", "-y", "socat"])
-            check_call(["curl", "https://get.acme.sh", "|", "sh", "-s", f"email={email}"])
-        except ValueError as e:
-            logger.error(e)
-            self.unit.status = BlockedStatus(str(e))
-            event.defer()
-            return
+            self._install_acmesh()
+            self.unit.status = ActiveStatus()
         except CalledProcessError as e:
-            logger.error(f"Could not install acme.sh Error code: {e.returncode}")
+            logger.error(f"Could not install acme.sh Error: {e}")
             self.unit.status = BlockedStatus(
-                f"Could not install acme.sh Error: {str(e)} Try redeploy or manual installation"
+                "Could not install acme.sh. Try redeploy or manual installation."
             )
+
+    def _install_acmesh(self) -> None:
+        """Install acme.sh and required dependencies."""
+        check_call(["apt", "install", "curl", "socat", "git", "-y"])
+        check_call(
+            ["git", "clone", "--depth", "1", "https://github.com/acmesh-official/acme.sh.git"],
+            cwd=self.acmesh_install_dir,
+        )
+        check_call(
+            [self.acmesh_install_script, "--install", "--home", self.acmesh_home],
+            cwd=self.acmesh_source_dir,
+        )
 
     def _on_config_changed(self, event: ConfigChangedEvent):
         """Handle changed configuration.
@@ -83,6 +101,8 @@ class AcmeshOperatorCharm(CharmBase):
         """
         # Fetch the new config value
         try:
+            self._validate_use_email()
+            logger.debug("use-email updated")
             self._validate_email()
             logger.debug("email updated")
             self._validate_server(server=self.model.config["server"].lower())
@@ -92,29 +112,28 @@ class AcmeshOperatorCharm(CharmBase):
             logger.error(error)
             self.unit.status = BlockedStatus(str(error))
 
+    def _validate_use_email(self) -> bool:
+        """Validate the use-email config option."""
+        use_email: bool = self.model.config["use-email"]
+        return use_email
+
     def _validate_email(self) -> str:
         """Validate the email address."""
         email = self.model.config["email"].lower()
-        if not email:
-            raise ValueError("Email cannot be empty")
+        if self.use_email:
+            if not email:
+                raise ValueError("Email cannot be empty when use-email is true")
+            regex = compile(r"([A-Za-z0-9]+[.-_])*[A-Za-z0-9]+@[A-Za-z0-9-]+(\.[A-Z|a-z]{2,})+")
+            if not fullmatch(regex, email):
+                raise ValueError(f"Please check email format. Invalid email: {email}")
         return email
 
     def _validate_server(self, server: str) -> str:
         """Validate the server."""
-        known_cas = [
-            "letsencrypt",
-            "letsencrypt_test",
-            "buypass",
-            "buypass_test",
-            "zerossl",
-            "sslcom",
-            "google",
-            "googletest",
-        ]
         if not server:
             raise ValueError("Server cannot be empty")
-        if server in known_cas:
-            return server
+        if server in KNOWN_CAS.keys():
+            return KNOWN_CAS[server]
         parse_result = urlparse(server)
         # Check that there is a valid scheme and domain
         if not all([parse_result.scheme, parse_result.netloc]):
@@ -123,26 +142,87 @@ class AcmeshOperatorCharm(CharmBase):
             raise ValueError("Server needs to be secured with https")
         return server
 
+    def _register_account(self, email: str, server: str) -> None:
+        """Register account with the specified server.
+
+        If their is already a registered account for the server there will not be an
+        error but if the email has changed then it will be updated.
+        """
+        try:
+            check_call([self.acmesh_script, "--register-account", "-m", email, "--server", server])
+        except CalledProcessError as e:
+            logger.error(e)
+            self.unit.status = ErrorStatus(f"Could not register account. Error: {e}")
+            raise e
+
+    def _should_register_account(self, email: str, server: str) -> bool:
+        """Check if an account should be registered or not for the provided server."""
+        # If the user does not want an email for notifications then do not register an account
+        if not self.use_email:
+            return False
+        # Assume that there is an email configured as that is being checked in config validation
+        # Does the server have an active account?
+        account_info = self._get_account_info_by_server(server=server)
+        if not account_info:
+            # Should register a new account with the email on server
+            return True
+        # We have an account, does it already have the provided email registered?
+        if email in account_info:
+            # There is already an account for the server with the provided email. Skip registration.
+            return False
+        # We have an account but without an email or another email address.
+        # Register the account to update
+        return True
+
+    def _get_account_info_by_server(self, server: str) -> str | None:
+        """List accounts created by acme.sh.
+
+        Accounts are under the <acme-home-dir>/ca/<server-domain>/
+
+        The "ca" directory only exists if at least one accunt has been registered
+        There can be 1 No account, 2 An account with email, 3 An account without email
+        """
+        account_info_path = self._get_account_info_path(server=server)
+        if not exists(account_info_path):
+            return None
+        account_info: str | None = None
+        with open(account_info_path, "r") as account_info_file:
+            account_info = account_info_file.read()
+        return account_info
+
+    def _get_account_info_path(self, server: str) -> str:
+        server_url = urlparse(server)
+        # Remove port as acme.sh does not seam to handle this.
+        netloc_no_port = server_url.netloc.split(":")[0]
+        return path.join(
+            self.acmesh_home,
+            "ca",
+            netloc_no_port,
+            server_url.path.removeprefix("/"),
+            "account.json",
+        )
+
     def _domain_from_csr(self, csr: str) -> str:
-        domain: str | None = None
+        """Get the domain from a csr."""
         try:
             csr_file_path = self._temporarily_save_file(content=csr, file_ending="csr")
             acme_out = check_output(
-                [self.acmesh_path, "--showcsr", "--csr", csr_file_path], text=True
+                [self.acmesh_script, "--showcsr", "--csr", csr_file_path], text=True
             )
 
             domain_out = check_output(
                 ["awk", 'BEGIN{FS="="} NR==1 { print $2 }'], input=acme_out, text=True
             )
             domain = domain_out.removesuffix("\n")
+            if not domain:
+                raise ValueError("Domain cannot be empty")
+            return domain
         except CalledProcessError as e:
             logger.error(e)
+            raise e
         finally:
             if exists(csr_file_path):
                 remove(csr_file_path)
-        if not domain:
-            raise ValueError("Could not get domain from csr")
-        return domain
 
     def _temporarily_save_file(self, content: str, file_ending: str) -> str:
         """Temporarily save a file in /tmp.
@@ -164,7 +244,7 @@ class AcmeshOperatorCharm(CharmBase):
         try:
             check_call(
                 [
-                    self.acmesh_path,
+                    self.acmesh_script,
                     "--signcsr",
                     "--csr",
                     csr_file_path,
@@ -172,7 +252,7 @@ class AcmeshOperatorCharm(CharmBase):
                     "--httpport",
                     self.HTTPPORT,
                     "--server",
-                    self.model.config["server"].lower(),
+                    self.server,
                 ]
             )
         except CalledProcessError as e:
@@ -183,6 +263,14 @@ class AcmeshOperatorCharm(CharmBase):
         finally:
             if exists(csr_file_path):
                 remove(csr_file_path)
+
+    def _certificates_to_list(self, certificates: str) -> list[str]:
+        """Turn a file with many certificates into separate certificates as a list of strings."""
+        certs = pem.parse(certificates)
+        certs_list = []
+        for cert in certs:
+            certs_list.append(str(cert))
+        return certs_list
 
     def _issue_certificate_from_csr(self, csr: str) -> NewCertificateResponse:
         response: NewCertificateResponse = {"ca": "", "certificate": "", "fullchain": ""}
@@ -199,7 +287,7 @@ class AcmeshOperatorCharm(CharmBase):
             fullchain_file_path = self._temporarily_save_file(content="", file_ending="fullchain")
             check_call(
                 [
-                    self.acmesh_path,
+                    self.acmesh_script,
                     "--install-cert",
                     "-d",
                     domain,
@@ -215,44 +303,49 @@ class AcmeshOperatorCharm(CharmBase):
                 certificate = crt_file.read()
                 with open(fullchain_file_path, "r") as fullchain_file:
                     fullchain = fullchain_file.read()
+                    fullchain_list = self._certificates_to_list(certificates=fullchain)
                     with open(ca_file_path, "r") as ca_file:
                         ca = ca_file.read()
                         response["certificate"] = certificate
                         response["ca"] = ca
-                        response["fullchain"] = fullchain
+                        response["fullchain"] = fullchain_list
+            return response
         except CalledProcessError as e:
             logger.error(e)
-            self.unit.status = ErrorStatus("Could not sign certificate from csr.")
+            self.unit.status = ErrorStatus(f"Could not sign certificate from csr. Error: {e}")
             raise e
         finally:
             file_paths_to_remove = [crt_file_path, fullchain_file_path, ca_file_path]
             for path_to_remove in file_paths_to_remove:
                 if exists(path_to_remove):
                     remove(path_to_remove)
-        return response
 
     def _on_signed_certificate_creation_request(
         self, event: CertificateCreationRequestEvent
     ) -> None:
+        if self._should_register_account(email=self.email, server=self.server):
+            self._register_account(email=self.email, server=self.server)
         csr = event.certificate_signing_request
         new_certificate_response = self._issue_certificate_from_csr(csr=csr)
         self.signed_certificates.set_relation_certificate(
             certificate=new_certificate_response["certificate"],
             certificate_signing_request=csr,
             ca=new_certificate_response["ca"],
-            chain="",  # For now, could be read from fullchain cert?
+            chain=new_certificate_response["fullchain"],
             relation_id=event.relation_id,
         )
+        self.unit.status = ActiveStatus("Certificate created.")
 
     def _revoke_certificate(self, csr: str, certificate: str) -> None:
         """Revoke a certificate."""
         try:
             domain = self._domain_from_csr(csr)
-            check_call([self.acmesh_path, "--revoke", "-d", domain])
+            check_call([self.acmesh_script, "--revoke", "-d", domain])
+            self.signed_certificates.remove_certificate(certificate)
         except CalledProcessError as e:
             logger.error(e)
             self.unit.status = ErrorStatus("Could not revoke certificate")
-        self.signed_certificates.remove_certificate(certificate)
+            raise e
 
     def _on_signed_certificate_revocation_request(
         self, event: CertificateRevocationRequestEvent
@@ -260,11 +353,51 @@ class AcmeshOperatorCharm(CharmBase):
         self._revoke_certificate(
             csr=event.certificate_signing_request, certificate=event.certificate
         )
+        self.unit.status = ActiveStatus()
 
     @property
-    def acmesh_path(self) -> str:
-        """The path to the acme.sh script."""
-        return self._ACMESH_PATH
+    def acmesh_install_dir(self) -> str:
+        """Absolute path to acme.sh install/git clone dir."""
+        return self._ACMESH_INSTALL_DIR
+
+    @property
+    def acmesh_source_dir(self) -> str:
+        """Absolute path to the acme.sh source dir."""
+        return path.join(self.acmesh_install_dir, "acme.sh")
+
+    @property
+    def acmesh_install_script(self) -> str:
+        """Absolute path to the acme.sh install script."""
+        return path.join(self.acmesh_install_dir, "acme.sh", "acme.sh")
+
+    @property
+    def acmesh_script(self) -> str:
+        """Absolute path to the acme.sh script."""
+        return path.join(self.acmesh_home, "acme.sh")
+
+    @property
+    def acmesh_home(self) -> str:
+        """Absolute path to the acme home dir."""
+        return path.join(self.acmesh_install_dir, ".acme.sh")
+
+    @property
+    def use_email(self) -> bool:
+        """Use an email for account registration config value."""
+        return self.model.config["use-email"]
+
+    @property
+    def email(self) -> str:
+        """Configured email."""
+        return self.model.config["email"]
+
+    @property
+    def server(self) -> str:
+        """Server url."""
+        config_server = self.model.config["server"].lower()
+        if config_server in KNOWN_CAS.keys():
+            return KNOWN_CAS[config_server]
+
+        return config_server
 
 
 if __name__ == "__main__":
