@@ -33,7 +33,7 @@ options:
       Please see some supported here https://github.com/acmesh-official/acme.sh/wiki/Server
       Any other RFC8555-compliant CA should also be supported.
 
-      The default CA is zerossl.
+      Currently supported are letsencrypt, letsencrypt_test and zerossl. The default CA is zerossl. 
 
       REQUIRED
 

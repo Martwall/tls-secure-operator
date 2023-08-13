@@ -4,3 +4,4 @@ cryptography
 pylxd
 urllib3 < 2
 pem
+pydantic
