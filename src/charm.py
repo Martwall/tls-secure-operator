@@ -4,7 +4,7 @@
 #
 # Learn more at: https://juju.is/docs/sdk
 """This is a docstring."""
-#TODO: ErrorStatus is never set from the charm code https://juju.is/docs/sdk/constructs#heading--statuses
+# TODO: ErrorStatus is never set from the charm code https://juju.is/docs/sdk/constructs#heading--statuses
 import logging
 from os import environ, path, remove
 from os.path import exists
@@ -13,20 +13,33 @@ from secrets import token_urlsafe
 from subprocess import CalledProcessError, check_call, check_output
 from typing import TypedDict
 from urllib.parse import urlparse
-from pydantic import ValidationError
 
 import pem
-from ops.charm import CharmBase, ConfigChangedEvent, InstallEvent, RelationChangedEvent
-from ops.main import main
-from ops.model import ActiveStatus, BlockedStatus, ErrorStatus, MaintenanceStatus
-
-from lib.charms.tls_certificates_interface.v2.tls_certificates import (
-    CertificateCreationRequestEvent,
-    CertificateRevocationRequestEvent,
-    TLSCertificatesProvidesV2,
+from interface_api import (
+    CertificateCreatedResponse,
+    CertificateRequest,
+    CertificateRequestTypeEnum,
+    CertificateRevokedResponse,
+    UnitForCertificateResponse,
 )
-
-from interface_api import CertificateRequest, CertificateCreatedResponse, CertificateRequestTypeEnum
+from ops.charm import (
+    CharmBase,
+    ConfigChangedEvent,
+    InstallEvent,
+    RelationBrokenEvent,
+    RelationChangedEvent,
+    RelationDepartedEvent,
+    RelationJoinedEvent,
+)
+from ops.main import main
+from ops.model import (
+    ActiveStatus,
+    BlockedStatus,
+    ErrorStatus,
+    MaintenanceStatus,
+    RelationNotFoundError,
+)
+from pydantic import ValidationError
 
 # Log messages can be retrieved using juju debug-log
 logger = logging.getLogger(__name__)
@@ -49,7 +62,7 @@ class NewCertificateResponse(TypedDict):
 
     certificate: str
     ca: str
-    fullchain: list[str]
+    fullchain: str
 
 
 class AcmeshOperatorCharm(CharmBase):
@@ -61,14 +74,21 @@ class AcmeshOperatorCharm(CharmBase):
 
     def __init__(self, *args):
         super().__init__(*args)
-        self.signed_certificates = TLSCertificatesProvidesV2(self, "signedcertificates")
         self.framework.observe(
-            self.signed_certificates.on.certificate_creation_request,
-            self._on_signed_certificate_creation_request,
+            self.on.signedcertificates_relation_joined,
+            self._on_signedcertificates_relation_joined,
         )
         self.framework.observe(
-            self.signed_certificates.on.certificate_revocation_request,
-            self._on_signed_certificate_revocation_request,
+            self.on.signedcertificates_relation_changed,
+            self._on_signedcertificates_relation_changed,
+        )
+        self.framework.observe(
+            self.on.signedcertificates_relation_broken,
+            self._on_signedcertificates_relation_broken,
+        )
+        self.framework.observe(
+            self.on.signedcertificates_relation_departed,
+            self._on_signedcertificates_relation_departed,
         )
         self.framework.observe(self.on.install, self._on_install)
         self.framework.observe(self.on.config_changed, self._on_config_changed)
@@ -306,12 +326,11 @@ class AcmeshOperatorCharm(CharmBase):
                 certificate = crt_file.read()
                 with open(fullchain_file_path, "r") as fullchain_file:
                     fullchain = fullchain_file.read()
-                    fullchain_list = self._certificates_to_list(certificates=fullchain)
                     with open(ca_file_path, "r") as ca_file:
                         ca = ca_file.read()
                         response["certificate"] = certificate
                         response["ca"] = ca
-                        response["fullchain"] = fullchain_list
+                        response["fullchain"] = fullchain
             return response
         except CalledProcessError as e:
             logger.error(e)
@@ -323,66 +342,96 @@ class AcmeshOperatorCharm(CharmBase):
                 if exists(path_to_remove):
                     remove(path_to_remove)
 
-    # def _on_relation_changed(self, event: RelationChangedEvent) -> None:
-    #     """"""
-    #     # Assume that this is an app event. That it is the application that requires one signed certificate to send to a load balancer/ssl termination proxy.
-    #     data = event.relation.data[event.app]
-    #     try:
-    #         request = CertificateRequest(certificate_signing_request=data["certificate_signing_request"], request_type=data["request_type"])
-    #         if request.request_type == CertificateRequestTypeEnum.create:
-    #             self._create_signed_certificate(csr=request.certificate_signing_request)
-    #     except ValidationError as e:
-    #         logger.error(e.errors())
+    def _on_signedcertificates_relation_joined(self, event: RelationJoinedEvent) -> None:
+        """Relation joined event handler.
 
-    # def _create_signed_certificate(
-    #     self, csr: str
-    # ) -> None:
-    #     if self._should_register_account(email=self.email, server=self.server):
-    #         self._register_account(email=self.email, server=self.server)
-    #     new_certificate_response = self._issue_certificate_from_csr(csr=csr)
-    #     self.signed_certificates.set_relation_certificate(
-    #         certificate=new_certificate_response["certificate"],
-    #         certificate_signing_request=csr,
-    #         ca=new_certificate_response["ca"],
-    #         chain=new_certificate_response["fullchain"],
-    #         relation_id=event.relation_id,
-    #     )
-    #     self.unit.status = ActiveStatus("Certificate created.")
+        For now just log
+        """
+        logger.info(f"Relation joined with app: {event.app}")
 
-    def _on_signed_certificate_creation_request(
-        self, event: CertificateCreationRequestEvent
-    ) -> None:
+    def _on_signedcertificates_relation_changed(self, event: RelationChangedEvent) -> None:
+        """Assume that this is an app event.
+
+        That it is the application that requires one signed certificate
+        to send to a load balancer/ssl termination proxy.
+
+        """
+        data = event.relation.data[event.app]
+        status_msg = ""
+        try:
+            request = CertificateRequest(
+                certificate_signing_request=data["certificate_signing_request"],
+                request_type=data["request_type"],
+            )
+            if request.request_type == CertificateRequestTypeEnum.create:
+                response = self._create_signed_certificate(csr=request.certificate_signing_request)
+                status_msg = "Certificate created."
+            elif request.request_type == CertificateRequestTypeEnum.renew:
+                # For now do the same as creating a new certificate.
+                # TODO: Update this to call acme.sh --renew -d ...
+                response = self._create_signed_certificate(csr=request.certificate_signing_request)
+                status_msg = "Certificate renewed."
+            elif request.request_type == CertificateRequestTypeEnum.revoke:
+                # Revoke the certificate
+                self._revoke_signed_certificate(csr=request.certificate_signing_request)
+                status_msg = "Certificate revoked."
+            else:
+                # This should no happen without throwing a validation error but to not fail:
+                return
+            # The unit updates its data bucket with the new certificate information
+            # Because the values are only allowed to be strings a nested dict is not allowed but a 
+            # key needs to be provided as well.
+            # So set a key and then dump json
+            event.relation.data[self.unit].update({"signedcertificates": response.model_dump_json()})
+            self.unit.status = ActiveStatus(status_msg)
+
+        except ValidationError as e:
+            logger.error(e.errors())
+
+    def _on_signedcertificates_relation_broken(self, event: RelationBrokenEvent) -> None:
+        """Relation broken event handler.
+
+        For now just log.
+        """
+        logger.info(f"Relation broken with app: {event.app}")
+
+    def _on_signedcertificates_relation_departed(self, event: RelationDepartedEvent) -> None:
+        """Relation departed event handler.
+
+        For now just log.
+        """
+        logger.info(f"Relation broken with app: {event.app}")
+
+    def _create_signed_certificate(self, csr: str) -> CertificateCreatedResponse:
         if self._should_register_account(email=self.email, server=self.server):
             self._register_account(email=self.email, server=self.server)
-        csr = event.certificate_signing_request
         new_certificate_response = self._issue_certificate_from_csr(csr=csr)
-        self.signed_certificates.set_relation_certificate(
+        response = CertificateCreatedResponse(
             certificate=new_certificate_response["certificate"],
             certificate_signing_request=csr,
             ca=new_certificate_response["ca"],
-            chain=new_certificate_response["fullchain"],
-            relation_id=event.relation_id,
+            fullchain=new_certificate_response["fullchain"],
+            issued_by=self.unit_for_certificate_response,
         )
-        self.unit.status = ActiveStatus("Certificate created.")
 
-    def _revoke_certificate(self, csr: str, certificate: str) -> None:
+        return response
+
+    def _revoke_signed_certificate(self, csr: str) -> CertificateRevokedResponse:
         """Revoke a certificate."""
+        response = CertificateRevokedResponse(
+            certificate_signing_request=csr,
+            is_revoked=False,
+            issued_by=self.unit_for_certificate_response,
+        )
         try:
             domain = self._domain_from_csr(csr)
             check_call([self.acmesh_script, "--revoke", "-d", domain])
-            self.signed_certificates.remove_certificate(certificate)
+            response.is_revoked = True
         except CalledProcessError as e:
             logger.error(e)
-            self.unit.status = ErrorStatus("Could not revoke certificate")
-            raise e
-
-    def _on_signed_certificate_revocation_request(
-        self, event: CertificateRevocationRequestEvent
-    ) -> None:
-        self._revoke_certificate(
-            csr=event.certificate_signing_request, certificate=event.certificate
-        )
-        self.unit.status = ActiveStatus()
+            self.unit.status = BlockedStatus("Could not revoke certificate")
+        finally:
+            return response
 
     @property
     def acmesh_install_dir(self) -> str:
@@ -427,17 +476,28 @@ class AcmeshOperatorCharm(CharmBase):
             return KNOWN_CAS[config_server]
 
         return config_server
-    
+
     @property
-    def ingress_address(self) -> str | None:
+    def ingress_address(self) -> str:
         """The address other service should use to connect to this unit."""
-        binding = self.model.get_binding("juju-info")
-        if not binding:
+        try:
+            binding = self.model.get_binding("juju-info")
+            if not binding:
+                return None
+            ingress_address = binding.network.ingress_address
+            if not ingress_address:
+                return None
+            return str(ingress_address)
+        except RelationNotFoundError as e:
+            logger.error(e)
             return None
-        ingress_address = binding.network.ingress_address
-        if not ingress_address:
-            return None
-        return str(ingress_address)
+
+    @property
+    def unit_for_certificate_response(self) -> UnitForCertificateResponse:
+        """The unit identification to set when updating certificates in the unit data bag."""
+        address = self.ingress_address
+        # IF the address is None it would be raised as an error in pydantic validator
+        return UnitForCertificateResponse(name=self.unit.name, ingress_address=address)
 
 
 if __name__ == "__main__":

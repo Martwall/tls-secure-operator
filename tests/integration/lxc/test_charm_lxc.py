@@ -82,9 +82,9 @@ class TestCharm(unittest.TestCase):
         self.harness = ops.testing.Harness(AcmeshOperatorCharm)
         self.harness.set_model_name("testing-acmesh-operator")
         self.relation_name = "signedcertificates"
-        self.remote_app = "signed-certs-requirer"
+        self.remote_app_name = "signed-certs-requirer"
         self.remote_unit_name = "signed-certs-requirer/0"
-        self.relation_id = self.harness.add_relation(self.relation_name, self.remote_app)
+        self.relation_id = self.harness.add_relation(self.relation_name, self.remote_app_name)
         self.harness.update_config({"use-email": True})
         self.harness.update_config({"email": "someone@example.com"})
         # Pebble testing server ACME directory url
@@ -134,49 +134,19 @@ class TestCharm(unittest.TestCase):
 
     def test_signed_certificate_creation_request_and_certificate_revocation(self):
         reinstall_acmesh()
-        key_values = {
-            "certificate_signing_requests": json.dumps(
-                [
-                    {
-                        "certificate_signing_request": self.valid_csr,
-                    }
-                ]
-            )
-        }
-        self.harness.update_relation_data(self.relation_id, self.remote_unit_name, key_values)
-        # Certs should now be available. Test revocation
-        with open("/root/.acme.sh/localhost/localhost.cer") as certificate_file:
-            crt = certificate_file.read()
-            self.harness.charm._revoke_certificate(csr=self.valid_csr, certificate=crt)
-
-    def test_signed_certificate_creation_request_and_account_creation(self):
-        reinstall_acmesh()
-        {
-            "certificate_signing_requests": json.dumps(
-                [
-                    {
-                        "certificate_signing_request": self.valid_csr,
-                    }
-                ]
-            )
-        }
-        self.harness.charm._on_signed_certificate_creation_request(
-            self.certificate_creation_request_event_mock
+        self.harness.update_relation_data(
+            self.relation_id,
+            self.remote_app_name,
+            {"certificate_signing_request": self.valid_csr, "request_type": "create"},
         )
-        
         self.assertEqual(self.harness.model.unit.status, ActiveStatus("Certificate created."))
         # There is a valid email and use-email is true. Check an account was created with email.
         account_info = self.harness.charm._get_account_info_by_server(
             server=self.harness.charm.server
         )
         self.assertIn(self.harness.charm.email, account_info)
-
-        # with patch.object(
-        #     self.harness.charm, "_on_signed_certificate_creation_request", new_callable=MagicMock
-        # ) as _on_signed_certificate_creation_request_mock:
-        #     # This should trigger the _on_signed_certificate_creation_request()
-        #     self.harness.update_relation_data(self.relation_id, self.remote_unit_name, key_values)
-        #     _on_signed_certificate_creation_request_mock.assert_called_once()
+        # Certs should now be available. Test revocation
+        self.harness.charm._revoke_signed_certificate(csr=self.valid_csr)
 
     def test_install_acmesh(self):
         uninstall_acmesh()

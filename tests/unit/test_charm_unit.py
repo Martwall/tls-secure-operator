@@ -3,6 +3,7 @@
 #
 # Learn more about testing at: https://juju.is/docs/sdk/testing
 
+import json
 import logging
 import unittest
 from os import mkdir
@@ -12,6 +13,7 @@ from shutil import rmtree
 import ops
 import ops.testing
 from charm import AcmeshOperatorCharm
+from interface_api import CertificateCreatedResponse, UnitForCertificateResponse
 
 logger = logging.getLogger(__name__)
 
@@ -115,6 +117,27 @@ class TestCharm(unittest.TestCase):
         self.assertEqual(len(one_cert_list), 1)
         self.assertEqual(len(two_certs_list), 2)
         self.assertIsInstance(one_cert_list[0], str)
+
+    def test_creation_response(self):
+        """Test the output format from a certificate creation request."""
+        unit = UnitForCertificateResponse(name="Unit name", ingress_address="123.123.123.1")
+        response = CertificateCreatedResponse(
+            certificate="A certificate",
+            certificate_signing_request="A csr",
+            ca="A ca certificate",
+            fullchain="Concatenated fullchain certificate",
+            issued_by=unit,
+        )
+        expected_dict = {
+            "certificate": "A certificate",
+            "certificate_signing_request": "A csr",
+            "ca": "A ca certificate",
+            "fullchain": "Concatenated fullchain certificate",
+            "issued_by": {"name": "Unit name", "ingress_address": "123.123.123.1"},
+        }
+        self.assertEqual(
+            json.loads(json.dumps(expected_dict)), json.loads(response.model_dump_json())
+        )
 
     @classmethod
     def cleanup_tmp_dir(cls) -> None:
