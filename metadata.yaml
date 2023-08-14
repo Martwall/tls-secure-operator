@@ -24,4 +24,4 @@ description: |
 
 provides:
   signedcertificates:
-    interface: acmesh-tls-certificates
+    interface: tls-certificates
