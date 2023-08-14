@@ -22,6 +22,8 @@ description: |
 
   Charms needing signed TLS certificates.
 
+subordinate: true
+
 provides:
   signedcertificates:
-    interface: acmesh-tls-certificates
+    interface: tls-certificates
