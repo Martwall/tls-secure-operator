@@ -5,6 +5,7 @@
 # Learn more at: https://juju.is/docs/sdk
 """This is a docstring."""
 # TODO: ErrorStatus is never set from the charm code https://juju.is/docs/sdk/constructs#heading--statuses
+
 import logging
 from os import environ, path, remove
 from os.path import exists
@@ -30,6 +31,7 @@ from ops.charm import (
     RelationChangedEvent,
     RelationDepartedEvent,
     RelationJoinedEvent,
+    UpdateStatusEvent
 )
 from ops.main import main
 from ops.model import (
@@ -71,6 +73,7 @@ class AcmeshOperatorCharm(CharmBase):
     TEMPORARY_DIR_PATH = "/tmp"
     HTTPPORT = "80"  # Httpport for acme.sh standalone server
     _ACMESH_INSTALL_DIR = environ.get("JUJU_CHARM_DIR")
+    SOCKET_FILE = "/tmp/certificate-notifications"
 
     def __init__(self, *args):
         super().__init__(*args)
@@ -91,6 +94,7 @@ class AcmeshOperatorCharm(CharmBase):
             self._on_signedcertificates_relation_departed,
         )
         self.framework.observe(self.on.install, self._on_install)
+        self.framework.observe(self.on.update_status, self._on_update_status)
         self.framework.observe(self.on.config_changed, self._on_config_changed)
 
     def _on_install(self, event: InstallEvent) -> None:
@@ -164,6 +168,10 @@ class AcmeshOperatorCharm(CharmBase):
         if parse_result.scheme != "https":
             raise ValueError("Server needs to be secured with https")
         return server
+    
+    def _on_update_status(self, event: UpdateStatusEvent):
+        """Check if any certificates have been renewed and update the unit databag"""
+
 
     def _register_account(self, email: str, server: str) -> None:
         """Register account with the specified server.
@@ -379,10 +387,12 @@ class AcmeshOperatorCharm(CharmBase):
                 # This should no happen without throwing a validation error but to not fail:
                 return
             # The unit updates its data bucket with the new certificate information
-            # Because the values are only allowed to be strings a nested dict is not allowed but a 
+            # Because the values are only allowed to be strings a nested dict is not allowed but a
             # key needs to be provided as well.
             # So set a key and then dump json
-            event.relation.data[self.unit].update({"signedcertificates": response.model_dump_json()})
+            event.relation.data[self.unit].update(
+                {"signedcertificates": response.model_dump_json()}
+            )
             self.unit.status = ActiveStatus(status_msg)
 
         except ValidationError as e:

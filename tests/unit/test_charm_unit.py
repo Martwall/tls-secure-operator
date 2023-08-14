@@ -42,7 +42,6 @@ class TestCharm(unittest.TestCase):
         self.harness.update_config({"server": "https://localhost:14000/dir"})
         self.addCleanup(self.harness.cleanup)
         self.harness.begin()
-
         self.harness.add_relation_unit(self.relation_id, self.remote_unit_name)
         self.harness.charm.HTTPPORT = "5002"
         self.harness.charm._ACMESH_INSTALL_DIR = "/root"
