@@ -4,7 +4,7 @@
 #
 # Learn more at: https://juju.is/docs/sdk
 """This is a docstring."""
-#TODO: ErrorStatus is never set from the charm code https://juju.is/docs/sdk/constructs#heading--statuses
+# TODO: ErrorStatus is never set from the charm code https://juju.is/docs/sdk/constructs#heading--statuses
 import logging
 from os import environ, path, remove
 from os.path import exists
@@ -13,10 +13,9 @@ from secrets import token_urlsafe
 from subprocess import CalledProcessError, check_call, check_output
 from typing import TypedDict
 from urllib.parse import urlparse
-from pydantic import ValidationError
 
 import pem
-from ops.charm import CharmBase, ConfigChangedEvent, InstallEvent, RelationChangedEvent
+from ops.charm import CharmBase, ConfigChangedEvent, InstallEvent
 from ops.main import main
 from ops.model import ActiveStatus, BlockedStatus, ErrorStatus, MaintenanceStatus
 
@@ -25,8 +24,6 @@ from lib.charms.tls_certificates_interface.v2.tls_certificates import (
     CertificateRevocationRequestEvent,
     TLSCertificatesProvidesV2,
 )
-
-from interface_api import CertificateRequest, CertificateCreatedResponse, CertificateRequestTypeEnum
 
 # Log messages can be retrieved using juju debug-log
 logger = logging.getLogger(__name__)
@@ -323,32 +320,6 @@ class AcmeshOperatorCharm(CharmBase):
                 if exists(path_to_remove):
                     remove(path_to_remove)
 
-    # def _on_relation_changed(self, event: RelationChangedEvent) -> None:
-    #     """"""
-    #     # Assume that this is an app event. That it is the application that requires one signed certificate to send to a load balancer/ssl termination proxy.
-    #     data = event.relation.data[event.app]
-    #     try:
-    #         request = CertificateRequest(certificate_signing_request=data["certificate_signing_request"], request_type=data["request_type"])
-    #         if request.request_type == CertificateRequestTypeEnum.create:
-    #             self._create_signed_certificate(csr=request.certificate_signing_request)
-    #     except ValidationError as e:
-    #         logger.error(e.errors())
-
-    # def _create_signed_certificate(
-    #     self, csr: str
-    # ) -> None:
-    #     if self._should_register_account(email=self.email, server=self.server):
-    #         self._register_account(email=self.email, server=self.server)
-    #     new_certificate_response = self._issue_certificate_from_csr(csr=csr)
-    #     self.signed_certificates.set_relation_certificate(
-    #         certificate=new_certificate_response["certificate"],
-    #         certificate_signing_request=csr,
-    #         ca=new_certificate_response["ca"],
-    #         chain=new_certificate_response["fullchain"],
-    #         relation_id=event.relation_id,
-    #     )
-    #     self.unit.status = ActiveStatus("Certificate created.")
-
     def _on_signed_certificate_creation_request(
         self, event: CertificateCreationRequestEvent
     ) -> None:
@@ -427,7 +398,7 @@ class AcmeshOperatorCharm(CharmBase):
             return KNOWN_CAS[config_server]
 
         return config_server
-    
+
     @property
     def ingress_address(self) -> str | None:
         """The address other service should use to connect to this unit."""

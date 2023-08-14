@@ -163,7 +163,7 @@ class TestCharm(unittest.TestCase):
         self.harness.charm._on_signed_certificate_creation_request(
             self.certificate_creation_request_event_mock
         )
-        
+
         self.assertEqual(self.harness.model.unit.status, ActiveStatus("Certificate created."))
         # There is a valid email and use-email is true. Check an account was created with email.
         account_info = self.harness.charm._get_account_info_by_server(
