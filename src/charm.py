@@ -4,7 +4,7 @@
 #
 # Learn more at: https://juju.is/docs/sdk
 """This is a docstring."""
-# TODO: ErrorStatus is never set from the charm code https://juju.is/docs/sdk/constructs#heading--statuses
+# TODO: BlockedStatus is never set from the charm code https://juju.is/docs/sdk/constructs#heading--statuses
 import logging
 from os import environ, path, remove
 from os.path import exists
@@ -17,7 +17,7 @@ from urllib.parse import urlparse
 import pem
 from ops.charm import CharmBase, ConfigChangedEvent, InstallEvent
 from ops.main import main
-from ops.model import ActiveStatus, BlockedStatus, ErrorStatus, MaintenanceStatus
+from ops.model import ActiveStatus, BlockedStatus, MaintenanceStatus
 
 from charms.tls_certificates_interface.v2.tls_certificates import (
     CertificateCreationRequestEvent,
@@ -152,7 +152,7 @@ class AcmeshOperatorCharm(CharmBase):
             check_call([self.acmesh_script, "--register-account", "-m", email, "--server", server])
         except CalledProcessError as e:
             logger.error(e)
-            self.unit.status = ErrorStatus(f"Could not register account. Error: {e}")
+            self.unit.status = BlockedStatus(f"Could not register account. Error: {e}")
             raise e
 
     def _should_register_account(self, email: str, server: str) -> bool:
@@ -257,8 +257,7 @@ class AcmeshOperatorCharm(CharmBase):
             )
         except CalledProcessError as e:
             logger.error(e)
-            if exists(csr_file_path):
-                remove(csr_file_path)
+            self.unit.status = BlockedStatus("Could not get certificate from csr")
             raise e
         finally:
             if exists(csr_file_path):
@@ -312,7 +311,8 @@ class AcmeshOperatorCharm(CharmBase):
             return response
         except CalledProcessError as e:
             logger.error(e)
-            self.unit.status = ErrorStatus(f"Could not sign certificate from csr. Error: {e}")
+            self.unit.status = BlockedStatus(f"Could not issue signed certificate from csr. Error: {e}")
+            # Do not raise error as that is not recommended in charm relation events
             raise e
         finally:
             file_paths_to_remove = [crt_file_path, fullchain_file_path, ca_file_path]
@@ -323,18 +323,21 @@ class AcmeshOperatorCharm(CharmBase):
     def _on_signed_certificate_creation_request(
         self, event: CertificateCreationRequestEvent
     ) -> None:
-        if self._should_register_account(email=self.email, server=self.server):
-            self._register_account(email=self.email, server=self.server)
-        csr = event.certificate_signing_request
-        new_certificate_response = self._issue_certificate_from_csr(csr=csr)
-        self.signed_certificates.set_relation_certificate(
-            certificate=new_certificate_response["certificate"],
-            certificate_signing_request=csr,
-            ca=new_certificate_response["ca"],
-            chain=new_certificate_response["fullchain"],
-            relation_id=event.relation_id,
-        )
-        self.unit.status = ActiveStatus("Certificate created.")
+        try:
+            if self._should_register_account(email=self.email, server=self.server):
+                self._register_account(email=self.email, server=self.server)
+            csr = event.certificate_signing_request
+            new_certificate_response = self._issue_certificate_from_csr(csr=csr)
+            self.signed_certificates.set_relation_certificate(
+                certificate=new_certificate_response["certificate"],
+                certificate_signing_request=csr,
+                ca=new_certificate_response["ca"],
+                chain=new_certificate_response["fullchain"],
+                relation_id=event.relation_id,
+            )
+            self.unit.status = ActiveStatus("Certificate created.")
+        except CalledProcessError as e:
+            logger.error("Signed certificate creation request error: ", e)
 
     def _revoke_certificate(self, csr: str, certificate: str) -> None:
         """Revoke a certificate."""
@@ -344,7 +347,7 @@ class AcmeshOperatorCharm(CharmBase):
             self.signed_certificates.remove_certificate(certificate)
         except CalledProcessError as e:
             logger.error(e)
-            self.unit.status = ErrorStatus("Could not revoke certificate")
+            self.unit.status = BlockedStatus("Could not revoke certificate")
             raise e
 
     def _on_signed_certificate_revocation_request(

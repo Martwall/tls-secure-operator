@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 class DevRequirer(CharmBase):
     def __init__(self, *args):
-        super.__init__(*args)
+        super().__init__(*args)
         self.signed_certificates = TLSCertificatesRequiresV2(self, "signedcertificates", expiry_notification_time=1)
         self.framework.observe(
             self.signed_certificates.on.certificate_available,
@@ -68,15 +68,25 @@ class DevRequirer(CharmBase):
         
 
     def _on_certificate_available(self, event: CertificateAvailableEvent):
+        logger.info("ca certificate: ", event.ca)
+        logger.info("certificate: ", event.certificate)
+        logger.info("fullchain: ", event.chain)
+        logger.info("csr: ", event.certificate_signing_request)
         pass
 
     def _on_certificate_expiring(self, event: CertificateExpiringEvent):
+        logger.info("certificate expired: ", event.certificate)
         pass
 
     def _on_certificate_invalidated(self, event: CertificateInvalidatedEvent):
+        logger.info("certificate invalidated: ", event.certificate)
+        logger.info("csr: ", event.certificate_signing_request)
+        logger.info("chain: ", event.chain)
+        logger.info("Reason: ", event.reason)
         pass
 
     def _on_all_certificates_invalidated(self, event: AllCertificatesInvalidatedEvent):
+        logger.info("All certificates invalidated")
         pass
     
 
