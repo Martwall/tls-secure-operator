@@ -1,0 +1,21 @@
+# This file populates the Overview on Charmhub.
+# See https://juju.is/docs/sdk/metadata-reference for a checklist and guidance.
+
+# The charm package name, no spaces (required)
+# See https://juju.is/docs/sdk/naming#heading--naming-charms for guidance.
+name: dev-requirer
+ 
+# The following metadata are human-readable and will be published prominently on Charmhub.
+
+# (Recommended)
+display-name: dev requirer
+
+# (Required)
+summary: A signedcertificates requirer for development purposes
+
+description: |
+  A signedcertificates requirer for development purposes
+
+requires:
+  signedcertificates:
+    interface: tls-certificates

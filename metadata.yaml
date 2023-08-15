@@ -22,8 +22,10 @@ description: |
 
   Charms needing signed TLS certificates.
 
-subordinate: true
+# Subordinate units inherit the public/private address of the principal application. The container of the principal defines the network setup.
+subordinate: false
 
 provides:
   signedcertificates:
     interface: tls-certificates
+    scope: container

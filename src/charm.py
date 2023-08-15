@@ -19,7 +19,7 @@ from ops.charm import CharmBase, ConfigChangedEvent, InstallEvent
 from ops.main import main
 from ops.model import ActiveStatus, BlockedStatus, ErrorStatus, MaintenanceStatus
 
-from lib.charms.tls_certificates_interface.v2.tls_certificates import (
+from charms.tls_certificates_interface.v2.tls_certificates import (
     CertificateCreationRequestEvent,
     CertificateRevocationRequestEvent,
     TLSCertificatesProvidesV2,
