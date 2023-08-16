@@ -8,29 +8,31 @@ from pathlib import Path
 
 import pytest
 import yaml
+from juju.application import Application
+from juju.machine import Machine
 from pylxd import Client
 from pytest_operator.plugin import OpsTest
-from juju.application import Application
-from juju.unit import Unit
-from juju.machine import Machine
 
 logger = logging.getLogger(__name__)
 
 METADATA = yaml.safe_load(Path("./metadata.yaml").read_text())
 ACMESH_APP_NAME = METADATA["name"]
-REQUIRER_METADATA = yaml.safe_load(Path("./tests/integration/juju/dev_requirer_charm/metadata.yaml").read_text())
+REQUIRER_METADATA = yaml.safe_load(
+    Path("./tests/integration/juju/dev_requirer_charm/metadata.yaml").read_text()
+)
 REQUIRER_APP_NAME = REQUIRER_METADATA["name"]
 PEBBLE_LXD_INSTANCE_NAME = "pebble-dev"
 PEBBLE_DEV_SERVER_URL = f"https://{PEBBLE_LXD_INSTANCE_NAME}.lxd:14000/dir"
 
 
 def lxd_tasks(other_instance: str):
+    """Add pebble ca certificate to the machine via lxd."""
     lxd_client = Client()
     lxd_machine0 = lxd_client.instances.get(other_instance)
     lxd_pebble = lxd_client.instances.get(PEBBLE_LXD_INSTANCE_NAME)
     # Transfer certificate
-    certificate_file: bytes = lxd_pebble.files.get("/root/pebble/test/certs/pebble.minica.pem")
-    lxd_machine0.files.put("/usr/share/ca-certificates/pebble.minica.pem.crt", certificate_file)
+    ca_certificate_file: bytes = lxd_pebble.files.get("/root/pebble/test/certs/pebble.minica.pem")
+    lxd_machine0.files.put("/usr/share/ca-certificates/pebble.minica.pem.crt", ca_certificate_file)
     # Add to trusted
     minica_cert_name = "pebble.minica.pem.crt"
     ca_certificates_conf: bytes = lxd_machine0.files.get("/etc/ca-certificates.conf")
@@ -48,9 +50,7 @@ async def test_smoke(ops_test: OpsTest):
 
     Assert on the unit status before any relations/configurations take place.
     """
-    lxd_tasks("tester")
-
-    assert False == True
+    # Add a machine before so that certificates can be transfered to it
     await ops_test.model.add_machine()
     await ops_test.model.block_until(lambda: len(ops_test.model.machines) > 0, timeout=60)
     machine_list: list(str) = await ops_test.model.get_machines()
@@ -58,34 +58,24 @@ async def test_smoke(ops_test: OpsTest):
     machine0_id: str = machine_list[0]
     machine0: Machine = ops_test.model.machines[machine0_id]
 
-    logger.info(machine0.agent_status) # This is State in juju status
-    logger.info(machine0.status) # This is the Message but as short eg status_message = Running -> status = running
-    logger.info(machine0.safe_data) # all machine data
-    await ops_test.model.block_until(lambda: machine0.agent_status == "started", timeout=160)
-    lxd_container_name = machine0.dns_name
-    logger.info("machine dns: ", lxd_container_name)
-    lxd_client = Client()
-    lxd_machine0 = lxd_client.instances.get(lxd_container_name)
-    lxd_pebble = lxd_client.instances.get(PEBBLE_LXD_INSTANCE_NAME)
-    # Transfer certificate
-    certificate_file: bytes = lxd_pebble.files.get("/root/pebble/test/certs/pebble.minica.pem")
-    lxd_machine0.files.put("/usr/share/ca-certificates/pebble.minica.pem.crt", certificate_file)
-    # Add to trusted
-    minica_cert_name = "pebble.minica.pem.crt"
-    ca_certificates_conf: bytes = lxd_machine0.files.get("/etc/ca-certificates.conf")
-    if minica_cert_name not in ca_certificates_conf.decode():
-        ca_certificates_conf_new = ca_certificates_conf.decode() + minica_cert_name + "\n"
-        lxd_machine0.files.put(
-            "/etc/ca-certificates.conf", ca_certificates_conf_new.encode("utf-8")
-        )
-    lxd_machine0.execute(["update-ca-certificates"])
-
-    assert False == True
+    logger.info(machine0.agent_status)  # This is State in juju status
+    logger.info(
+        machine0.status
+    )  # This is the Message but as short eg status_message = Running -> status = running
+    logger.info(machine0.safe_data)  # all machine data
+    await ops_test.model.block_until(lambda: machine0.hostname is not None, timeout=160)
+    lxd_instance_name = machine0.hostname
+    logger.info(lxd_instance_name)
+    lxd_tasks(lxd_instance_name)
 
     #### Build and deploy dev requirer charm ####
     requirer_charm = await ops_test.build_charm("./tests/integration/juju/dev_requirer_charm")
-    requirer_app: Application = await ops_test.model.deploy(requirer_charm, num_units=1, application_name=REQUIRER_APP_NAME)
-    await ops_test.model.block_until(lambda: requirer_app.status in ("active", "error"), timeout=180)
+    requirer_app: Application = await ops_test.model.deploy(
+        requirer_charm, num_units=1, application_name=REQUIRER_APP_NAME, to=str(machine0_id)
+    )
+    await ops_test.model.block_until(
+        lambda: requirer_app.status in ("active", "error"), timeout=180
+    )
     # Allow for manual inspection if error
     if requirer_app.status == "error":
         logger.error("Received error status sleeping 300 seconds")
@@ -95,7 +85,9 @@ async def test_smoke(ops_test: OpsTest):
     #### Build and deploy subordinate acmesh-operator from local source folder ####
     charm = await ops_test.build_charm(".")
     acmesh_config = {"email": "tester@testingtests.com", "server": PEBBLE_DEV_SERVER_URL}
-    app: Application = await ops_test.model.deploy(charm, num_units=0, application_name=ACMESH_APP_NAME, config=acmesh_config)
+    app: Application = await ops_test.model.deploy(
+        charm, num_units=0, application_name=ACMESH_APP_NAME, config=acmesh_config
+    )
     # Relate the two applications
     await ops_test.model.add_relation(ACMESH_APP_NAME, REQUIRER_APP_NAME)
     await ops_test.model.wait_for_idle(apps=[ACMESH_APP_NAME, REQUIRER_APP_NAME])

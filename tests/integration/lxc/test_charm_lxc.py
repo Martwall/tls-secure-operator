@@ -110,7 +110,7 @@ class TestCharm(unittest.TestCase):
 
     def test_domain_from_csr_raises_error(self):
         reinstall_acmesh()
-        self.assertRaises(CalledProcessError, self.harness.charm._domain_from_csr, "invalid csr")
+        self.assertRaises(ValueError, self.harness.charm._domain_from_csr, "invalid csr")
 
     def test_certificate_from_csr(self):
         reinstall_acmesh()

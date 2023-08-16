@@ -10,20 +10,20 @@ from os import environ, path, remove
 from os.path import exists
 from re import compile, fullmatch
 from secrets import token_urlsafe
-from subprocess import CalledProcessError, check_call, check_output
+from subprocess import CalledProcessError, check_call
 from typing import TypedDict
 from urllib.parse import urlparse
 
 import pem
-from ops.charm import CharmBase, ConfigChangedEvent, InstallEvent
-from ops.main import main
-from ops.model import ActiveStatus, BlockedStatus, MaintenanceStatus
-
 from charms.tls_certificates_interface.v2.tls_certificates import (
     CertificateCreationRequestEvent,
     CertificateRevocationRequestEvent,
     TLSCertificatesProvidesV2,
 )
+from cryptography import x509
+from ops.charm import CharmBase, ConfigChangedEvent, InstallEvent
+from ops.main import main
+from ops.model import ActiveStatus, BlockedStatus, MaintenanceStatus
 
 # Log messages can be retrieved using juju debug-log
 logger = logging.getLogger(__name__)
@@ -204,25 +204,39 @@ class AcmeshOperatorCharm(CharmBase):
 
     def _domain_from_csr(self, csr: str) -> str:
         """Get the domain from a csr."""
+        # try:
         try:
-            csr_file_path = self._temporarily_save_file(content=csr, file_ending="csr")
-            acme_out = check_output(
-                [self.acmesh_script, "--showcsr", "--csr", csr_file_path], text=True
-            )
-
-            domain_out = check_output(
-                ["awk", 'BEGIN{FS="="} NR==1 { print $2 }'], input=acme_out, text=True
-            )
-            domain = domain_out.removesuffix("\n")
-            if not domain:
-                raise ValueError("Domain cannot be empty")
-            return domain
-        except CalledProcessError as e:
-            logger.error(e)
+            csr_x509 = x509.load_pem_x509_csr(csr.encode())
+        except ValueError as e:
+            logger.error(f"{e}")
+            self.unit.status = BlockedStatus("csr is malformed")
             raise e
-        finally:
-            if exists(csr_file_path):
-                remove(csr_file_path)
+        name_attributes = csr_x509.subject.get_attributes_for_oid(x509.NameOID.COMMON_NAME)
+        common_name = ""
+        if len(name_attributes) > 0:
+            # The value of the attribute. This will generally be a str, the only times it can be a bytes is when oid is X500_UNIQUE_IDENTIFIER.
+            common_name: str = name_attributes[0].value
+        # Get the sans
+        san_extension = None
+        try:
+            san_extension = csr_x509.extensions.get_extension_for_class(
+                x509.SubjectAlternativeName
+            )
+        except x509.ExtensionNotFound:
+            logger.error("No sans in csr")
+        if san_extension:
+            # Get the domain from sans. If the common name is in sans. Prefer that domain name otherwise use the sans dns
+            sans_dns = san_extension.value.get_values_for_type(x509.DNSName)
+            if common_name in sans_dns:
+                domain = common_name
+            else:
+                domain = sans_dns[0]
+        else:
+            domain = common_name
+        if not domain:
+            self.unit.status = BlockedStatus("Domain cannot be empty")
+            raise ValueError("Domain cannot be empty")
+        return domain
 
     def _temporarily_save_file(self, content: str, file_ending: str) -> str:
         """Temporarily save a file in /tmp.
@@ -311,7 +325,7 @@ class AcmeshOperatorCharm(CharmBase):
             return response
         except CalledProcessError as e:
             logger.error(e)
-            self.unit.status = BlockedStatus(f"Could not issue signed certificate from csr. Error: {e}")
+            self.unit.status = BlockedStatus("Could not issue signed certificate from csr")
             # Do not raise error as that is not recommended in charm relation events
             raise e
         finally:
@@ -336,8 +350,9 @@ class AcmeshOperatorCharm(CharmBase):
                 relation_id=event.relation_id,
             )
             self.unit.status = ActiveStatus("Certificate created.")
-        except CalledProcessError as e:
-            logger.error("Signed certificate creation request error: ", e)
+            # From what I understand relation hooks are not allowed to fail so catching all errors here
+        except Exception as e:
+            logger.error(f"Signed certificate creation request error: {e}")
 
     def _revoke_certificate(self, csr: str, certificate: str) -> None:
         """Revoke a certificate."""
@@ -353,10 +368,13 @@ class AcmeshOperatorCharm(CharmBase):
     def _on_signed_certificate_revocation_request(
         self, event: CertificateRevocationRequestEvent
     ) -> None:
-        self._revoke_certificate(
-            csr=event.certificate_signing_request, certificate=event.certificate
-        )
-        self.unit.status = ActiveStatus()
+        try:
+            self._revoke_certificate(
+                csr=event.certificate_signing_request, certificate=event.certificate
+            )
+            self.unit.status = ActiveStatus()
+        except CalledProcessError as e:
+            logger.error(e)
 
     @property
     def acmesh_install_dir(self) -> str:

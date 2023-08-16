@@ -166,3 +166,4 @@ cython_debug/
 *.charm
 .ruff_cache
 juju-crashdump*
+.vscode

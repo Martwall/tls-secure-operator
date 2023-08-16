@@ -4,6 +4,7 @@
 # Learn more about testing at: https://juju.is/docs/sdk/testing
 
 import logging
+import socket
 import unittest
 from os import mkdir
 from os.path import exists
@@ -12,6 +13,11 @@ from shutil import rmtree
 import ops
 import ops.testing
 from charm import AcmeshOperatorCharm
+
+from lib.charms.tls_certificates_interface.v2.tls_certificates import (
+    generate_csr,
+    generate_private_key,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -115,6 +121,20 @@ class TestCharm(unittest.TestCase):
         self.assertEqual(len(one_cert_list), 1)
         self.assertEqual(len(two_certs_list), 2)
         self.assertIsInstance(one_cert_list[0], str)
+
+    def test_domain_from_csr(self):
+        hostname = socket.gethostname()
+        sans_domain = hostname + ".lxd"
+        sans_dns = [sans_domain]
+        key = generate_private_key()
+        csr = generate_csr(
+            key,
+            subject="some subject",
+            sans_dns=sans_dns,
+            sans_ip=["1.1.1.1"],
+        )
+        domain = self.harness.charm._domain_from_csr(csr.decode())
+        self.assertEqual(domain, sans_domain)
 
     @classmethod
     def cleanup_tmp_dir(cls) -> None:
