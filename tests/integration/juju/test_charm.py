@@ -10,8 +10,12 @@ import pytest
 import yaml
 from juju.application import Application
 from juju.machine import Machine
+from juju.relation import Relation, Endpoint
 from pylxd import Client
 from pytest_operator.plugin import OpsTest
+
+from charms.harness_extensions.v0.relation_data_wrapper import get_relation_data_from_juju
+
 
 logger = logging.getLogger(__name__)
 
@@ -95,5 +99,27 @@ async def test_smoke(ops_test: OpsTest):
     if app.status == "error" or requirer_app.status == "error":
         logger.error("Received error status sleeping 300 seconds")
         await asyncio.sleep(300)
+    logger.info(app.safe_data)
+    logger.info(app.data)
+    logger.info(ops_test.model.relations)
+    logger.info(app.units)
+    logger.info(ops_test.model.units)
+    relations: list[Relation] = ops_test.model.relations
+    relation = relations[0]
+    logger.info(relation.data)
+    logger.info(relation.safe_data)
+    logger.info(relation.endpoints)
+    endpoints: list[Endpoint] = relation.endpoints
+    for endpoint in endpoints:
+        logger.info(endpoint.name)
+        logger.info(endpoint.application_name)
+        logger.info(endpoint.data)
+
+    relation_data = get_relation_data_from_juju(
+        provider_endpoint="acmesh-operator:signedcertificates",
+        requirer_endpoint="dev-requirer:signedcertificates",
+        include_default_juju_keys=False
+        )
+    logger.info(relation_data)
     assert app.status == "active"
     assert requirer_app.status == "active"
