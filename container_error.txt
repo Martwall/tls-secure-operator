@@ -1,0 +1,6 @@
+unit-<application-name>-0: 14:15:11 INFO juju.worker.uniter unit "<application-name>/0" started
+unit-<application-name>-0: 14:15:11 INFO juju.worker.uniter hooks are retried true
+unit-<application-name>-0: 14:15:11 ERROR juju.worker.uniter resolver loop error: preparing operation "run action 2" for <application-name>/0: cannot create runner for action "2": subordinate charm "<application-name>" lacks "requires" relation with container scope
+unit-<application-name>-0: 14:15:11 INFO juju.worker.uniter unit "<application-name>/0" shutting down: preparing operation "run action 2" for <application-name>/0: cannot create runner for action "2": subordinate charm "<application-name>" lacks "requires" relation with container scope
+unit-<application-name>-0: 14:15:11 ERROR juju.worker.dependency "uniter" manifold worker returned unexpected error: preparing operation "run action 2" for <application-name>/0: cannot create runner for action "2": subordinate charm "<application-name>" lacks "requires" relation with container scope
+unit-<application-name>-0: 14:16:38 ERROR juju.worker.dependency "metric-collect" manifold worker returned unexpected error: failed to read charm from: /var/lib/juju/agents/unit-<application-name>-0/charm: subordinate charm "<application-name>" lacks "requires" relation with container scope

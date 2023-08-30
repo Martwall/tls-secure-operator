@@ -29,3 +29,7 @@ provides:
   signedcertificates:
     interface: tls-certificates
     scope: container
+requires:
+  juju-info:
+    interface: juju-info
+    scope: container

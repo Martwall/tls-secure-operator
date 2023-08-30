@@ -21,7 +21,7 @@ from charms.tls_certificates_interface.v2.tls_certificates import (
     TLSCertificatesProvidesV2,
 )
 from cryptography import x509
-from ops.charm import CharmBase, ConfigChangedEvent, InstallEvent
+from ops.charm import ActionEvent, CharmBase, ConfigChangedEvent, InstallEvent
 from ops.main import main
 from ops.model import ActiveStatus, BlockedStatus, MaintenanceStatus
 
@@ -69,6 +69,13 @@ class AcmeshOperatorCharm(CharmBase):
         )
         self.framework.observe(self.on.install, self._on_install)
         self.framework.observe(self.on.config_changed, self._on_config_changed)
+        self.framework.observe(
+            self.on.create_certificate_action, self._on_create_certificate_action
+        )
+        self.framework.observe(self.on.renew_certificate_action, self._on_renew_certificate_action)
+        self.framework.observe(
+            self.on.revoke_certificate_action, self._on_revoke_certificate_action
+        )
 
     def _on_install(self, event: InstallEvent) -> None:
         logger.info("Installing acme.sh")
@@ -267,10 +274,12 @@ class AcmeshOperatorCharm(CharmBase):
                     self.HTTPPORT,
                     "--server",
                     self.server,
+                    "--force",
                 ]
             )
         except CalledProcessError as e:
             logger.error(e)
+            logger.error(e.output)
             self.unit.status = BlockedStatus("Could not get certificate from csr")
             raise e
         finally:
@@ -329,6 +338,7 @@ class AcmeshOperatorCharm(CharmBase):
             # Do not raise error as that is not recommended in charm relation events
             raise e
         finally:
+            # TODO: Should these files be saved???
             file_paths_to_remove = [crt_file_path, fullchain_file_path, ca_file_path]
             for path_to_remove in file_paths_to_remove:
                 if exists(path_to_remove):
@@ -354,11 +364,15 @@ class AcmeshOperatorCharm(CharmBase):
         except Exception as e:
             logger.error(f"Signed certificate creation request error: {e}")
 
+    def _revoke_certificate_by_domain(self, domain: str) -> None:
+        """Revoke a certificate based on the domain name."""
+        check_call([self.acmesh_script, "--revoke", "-d", domain])
+
     def _revoke_certificate(self, csr: str, certificate: str) -> None:
         """Revoke a certificate."""
         try:
             domain = self._domain_from_csr(csr)
-            check_call([self.acmesh_script, "--revoke", "-d", domain])
+            self._revoke_certificate_by_domain(domain)
             self.signed_certificates.remove_certificate(certificate)
         except CalledProcessError as e:
             logger.error(e)
@@ -375,6 +389,58 @@ class AcmeshOperatorCharm(CharmBase):
             self.unit.status = ActiveStatus()
         except CalledProcessError as e:
             logger.error(e)
+
+    def _create_certificate_in_action(self, event: ActionEvent) -> None:
+        """### Attempts to create the certificate and set the results."""
+        csr: str = event.params["csr"]
+        event.log("Attempting to create new certificate from csr...")
+        response: NewCertificateResponse = self._issue_certificate_from_csr(csr)
+        event.log("...new certificate created!")
+        event.set_results(response)
+
+    def _on_create_certificate_action(self, event: ActionEvent) -> None:
+        """### Create at certificate from a csr or domain.
+
+        Currently only from csr is supported.
+        """
+        try:
+            self._create_certificate_in_action(event)
+        except CalledProcessError as e:
+            event.fail(f"Failed to create new certificate from csr. Error: {e}")
+
+    def _on_revoke_certificate_action(self, event: ActionEvent) -> None:
+        """Handle when an admin revokes a certificate."""
+        domain = event.params["domain"]
+        try:
+            event.log(f"Revoking certificate for {domain} ...")
+            self._revoke_certificate_by_domain(domain)
+            event.log("...certificate revoked.")
+            event.set_results({"result": f"Revoked certificate for {domain}"})
+        except CalledProcessError as e:
+            logger.error(e)
+            event.fail(f"Failed to revoke certificate for {domain}. Error: {e}")
+
+    def _on_renew_certificate_action(self, event: ActionEvent) -> None:
+        """### Renew certificate from csr.
+
+        This function mimics the behaviour of tls-certificates interface. Meaning it will first
+        revoke the certificate and then create a new one. This is done so that testing
+        is easier. It is a separate operation from
+        how the tls-certificates lib handles it as that requires a relation between two charms.
+        """
+        csr: str = event.params["csr"]
+        try:
+            domain = self._domain_from_csr(csr)
+            event.log(f"Revoking certificate for domain: {domain} ...")
+            self._revoke_certificate_by_domain(domain)
+            event.log(f"...certificate revoked for domain: {domain}")
+            self._create_certificate_in_action(event)
+        except ValueError as e:
+            logger.error(e)
+            event.fail(f"Could not renew certificate. Error: {e}")
+        except CalledProcessError as e:
+            logger.error(e)
+            event.fail(f"Could not renew certificate for domain: {domain} Error: {e}")
 
     @property
     def acmesh_install_dir(self) -> str:

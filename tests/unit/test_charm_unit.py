@@ -136,6 +136,9 @@ class TestCharm(unittest.TestCase):
         domain = self.harness.charm._domain_from_csr(csr.decode())
         self.assertEqual(domain, sans_domain)
 
+    def test_revoke_action(self):
+        """Test revoking a certificate via an action."""
+
     @classmethod
     def cleanup_tmp_dir(cls) -> None:
         if exists(TEMPORARY_DIR_TEST_PATH):

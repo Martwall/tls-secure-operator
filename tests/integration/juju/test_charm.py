@@ -8,14 +8,16 @@ from pathlib import Path
 
 import pytest
 import yaml
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.x509.oid import NameOID
+from juju.action import Action
 from juju.application import Application
 from juju.machine import Machine
-from juju.relation import Relation, Endpoint
+from juju.unit import Unit
 from pylxd import Client
 from pytest_operator.plugin import OpsTest
-
-from charms.harness_extensions.v0.relation_data_wrapper import get_relation_data_from_juju
-
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +48,33 @@ def lxd_tasks(other_instance: str):
             "/etc/ca-certificates.conf", ca_certificates_conf_new.encode("utf-8")
         )
     lxd_machine0.execute(["update-ca-certificates"])
+
+
+def create_csr(common_name: str):
+    private_key = rsa.generate_private_key(
+        public_exponent=65537,
+        key_size=2048,
+    )
+
+    builder = x509.CertificateSigningRequestBuilder()
+    builder = builder.subject_name(
+        x509.Name(
+            [
+                x509.NameAttribute(NameOID.COMMON_NAME, common_name),
+            ]
+        )
+    )
+
+    builder = builder.add_extension(
+        x509.BasicConstraints(ca=False, path_length=None),
+        critical=True,
+    )
+    builder = builder.add_extension(
+        x509.SubjectAlternativeName([x509.DNSName(common_name)]),
+        critical=False
+    )
+    request = builder.sign(private_key, hashes.SHA256())
+    return request.public_bytes(serialization.Encoding.PEM)
 
 
 @pytest.mark.abort_on_fail
@@ -93,33 +122,31 @@ async def test_smoke(ops_test: OpsTest):
         charm, num_units=0, application_name=ACMESH_APP_NAME, config=acmesh_config
     )
     # Relate the two applications
+    # The requirer app will ask for a certificate
     await ops_test.model.add_relation(ACMESH_APP_NAME, REQUIRER_APP_NAME)
     await ops_test.model.wait_for_idle(apps=[ACMESH_APP_NAME, REQUIRER_APP_NAME])
     # Allow for manual inspection if errors
     if app.status == "error" or requirer_app.status == "error":
         logger.error("Received error status sleeping 300 seconds")
         await asyncio.sleep(300)
-    logger.info(app.safe_data)
-    logger.info(app.data)
-    logger.info(ops_test.model.relations)
-    logger.info(app.units)
-    logger.info(ops_test.model.units)
-    relations: list[Relation] = ops_test.model.relations
-    relation = relations[0]
-    logger.info(relation.data)
-    logger.info(relation.safe_data)
-    logger.info(relation.endpoints)
-    endpoints: list[Endpoint] = relation.endpoints
-    for endpoint in endpoints:
-        logger.info(endpoint.name)
-        logger.info(endpoint.application_name)
-        logger.info(endpoint.data)
 
-    relation_data = get_relation_data_from_juju(
-        provider_endpoint="acmesh-operator:signedcertificates",
-        requirer_endpoint="dev-requirer:signedcertificates",
-        include_default_juju_keys=False
-        )
-    logger.info(relation_data)
+    # TODO: Checkout the relation data
+
+    # Test running the certificate actions
+    fqdn = lxd_instance_name + ".lxd" # Should be the address to the machine where acmesh-operator is running
+    csr = create_csr(fqdn).decode().strip()
+    u: Unit = app.units[0]
+    for action_name in ["create-certificate", "renew-certificate"]:
+        action: Action = await u.run_action(action_name, csr=csr)
+        await action.wait()
+        assert "certificate" in action.results
+        assert action.results["certificate"] != ""
+
+    action: Action = await u.run_action("revoke-certificate", domain=fqdn)
+    await action.wait()
+    assert "result" in action.results
+    assert action.results["result"] != ""
+
+
     assert app.status == "active"
     assert requirer_app.status == "active"
