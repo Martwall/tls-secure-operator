@@ -70,8 +70,7 @@ def create_csr(common_name: str):
         critical=True,
     )
     builder = builder.add_extension(
-        x509.SubjectAlternativeName([x509.DNSName(common_name)]),
-        critical=False
+        x509.SubjectAlternativeName([x509.DNSName(common_name)]), critical=False
     )
     request = builder.sign(private_key, hashes.SHA256())
     return request.public_bytes(serialization.Encoding.PEM)
@@ -133,7 +132,9 @@ async def test_smoke(ops_test: OpsTest):
     # TODO: Checkout the relation data
 
     # Test running the certificate actions
-    fqdn = lxd_instance_name + ".lxd" # Should be the address to the machine where acmesh-operator is running
+    fqdn = (
+        lxd_instance_name + ".lxd"
+    )  # Should be the address to the machine where acmesh-operator is running
     csr = create_csr(fqdn).decode().strip()
     u: Unit = app.units[0]
     for action_name in ["create-certificate", "renew-certificate"]:
@@ -146,7 +147,6 @@ async def test_smoke(ops_test: OpsTest):
     await action.wait()
     assert "result" in action.results
     assert action.results["result"] != ""
-
 
     assert app.status == "active"
     assert requirer_app.status == "active"

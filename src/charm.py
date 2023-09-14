@@ -58,7 +58,7 @@ class AcmeshOperatorCharm(CharmBase):
 
     def __init__(self, *args):
         super().__init__(*args)
-        self.signed_certificates = TLSCertificatesProvidesV2(self, "signedcertificates")
+        self.signed_certificates = TLSCertificatesProvidesV2(self, "signed-certificates")
         self.framework.observe(
             self.signed_certificates.on.certificate_creation_request,
             self._on_signed_certificate_creation_request,
@@ -133,7 +133,9 @@ class AcmeshOperatorCharm(CharmBase):
             regex = compile(r"([A-Za-z0-9]+[.-_])*[A-Za-z0-9]+@[A-Za-z0-9-]+(\.[A-Z|a-z]{2,})+")
             if not fullmatch(regex, email):
                 raise ValueError(f"Please check email format. Invalid email: {email}")
-        return email
+            return email
+        else:
+            return ""
 
     def _validate_server(self, server: str) -> str:
         """Validate the server."""
@@ -164,9 +166,6 @@ class AcmeshOperatorCharm(CharmBase):
 
     def _should_register_account(self, email: str, server: str) -> bool:
         """Check if an account should be registered or not for the provided server."""
-        # If the user does not want an email for notifications then do not register an account
-        if not self.use_email:
-            return False
         # Assume that there is an email configured as that is being checked in config validation
         # Does the server have an active account?
         account_info = self._get_account_info_by_server(server=server)

@@ -17,5 +17,5 @@ description: |
   A signedcertificates requirer for development purposes
 
 requires:
-  signedcertificates:
+  signed-certificates:
     interface: tls-certificates

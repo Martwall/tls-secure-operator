@@ -29,7 +29,7 @@ class DevRequirer(CharmBase):
     def __init__(self, *args):
         super().__init__(*args)
         self.signed_certificates = TLSCertificatesRequiresV2(
-            self, "signedcertificates", expiry_notification_time=1
+            self, "signed-certificates", expiry_notification_time=1
         )
         self.framework.observe(
             self.signed_certificates.on.certificate_available, self._on_certificate_available

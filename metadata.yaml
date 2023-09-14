@@ -3,7 +3,7 @@
 
 # The charm package name, no spaces (required)
 # See https://juju.is/docs/sdk/naming#heading--naming-charms for guidance.
-name: acmesh-operator
+name: acmesh
  
 # The following metadata are human-readable and will be published prominently on Charmhub.
 
@@ -26,7 +26,7 @@ description: |
 subordinate: true
 
 provides:
-  signedcertificates:
+  signed-certificates:
     interface: tls-certificates
     scope: container
 requires:
