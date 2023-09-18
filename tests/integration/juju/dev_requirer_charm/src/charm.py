@@ -22,6 +22,7 @@ from ops.model import ModelError
 
 logger = logging.getLogger(__name__)
 
+INTERFACE_NAME = "signed-certificates"
 
 class DevRequirer(CharmBase):
     CSR_FILE_PATH = os.path.join(os.environ.get("JUJU_CHARM_DIR"), "request.csr")
@@ -29,7 +30,7 @@ class DevRequirer(CharmBase):
     def __init__(self, *args):
         super().__init__(*args)
         self.signed_certificates = TLSCertificatesRequiresV2(
-            self, "signed-certificates", expiry_notification_time=1
+            self, INTERFACE_NAME, expiry_notification_time=1
         )
         self.framework.observe(
             self.signed_certificates.on.certificate_available, self._on_certificate_available
@@ -45,7 +46,7 @@ class DevRequirer(CharmBase):
             self._on_all_certificates_invalidated,
         )
         self.framework.observe(
-            self.on.signedcertificates_relation_joined,
+            self.on.signed_certificates_relation_joined,
             self._on_signed_certificates_relation_joined,
         )
         self.framework.observe(self.on.install, self._on_install)
@@ -68,7 +69,7 @@ class DevRequirer(CharmBase):
             domain = hostname + ".lxd"
             sans_dns = [domain]
             container_ip = str(
-                self.model.get_binding("signedcertificates").network.ingress_address
+                self.model.get_binding(INTERFACE_NAME).network.ingress_address
             )
             logger.info(f"Hostname: {socket.gethostname()}")
             logger.info(f"THe fqdn is: {socket.getfqdn()}")

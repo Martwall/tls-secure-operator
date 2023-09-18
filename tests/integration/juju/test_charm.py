@@ -108,10 +108,7 @@ async def test_smoke(ops_test: OpsTest):
     await ops_test.model.block_until(
         lambda: requirer_app.status in ("active", "error"), timeout=180
     )
-    # Allow for manual inspection if error
-    if requirer_app.status == "error":
-        logger.error("Received error status sleeping 300 seconds")
-        await asyncio.sleep(300)
+
     assert requirer_app.status == "active"
 
     #### Build and deploy subordinate acmesh-operator from local source folder ####
@@ -124,10 +121,6 @@ async def test_smoke(ops_test: OpsTest):
     # The requirer app will ask for a certificate
     await ops_test.model.add_relation(ACMESH_APP_NAME, REQUIRER_APP_NAME)
     await ops_test.model.wait_for_idle(apps=[ACMESH_APP_NAME, REQUIRER_APP_NAME])
-    # Allow for manual inspection if errors
-    if app.status == "error" or requirer_app.status == "error":
-        logger.error("Received error status sleeping 300 seconds")
-        await asyncio.sleep(300)
 
     # TODO: Checkout the relation data
 

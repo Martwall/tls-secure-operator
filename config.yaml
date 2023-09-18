@@ -12,6 +12,8 @@ options:
       be set in the config before issuing a certificate. If set to false, no email is required to start
       issuing certificates.
 
+      Set to to false to not use an email.
+
     default: true
     type: boolean
 
@@ -33,7 +35,7 @@ options:
       Please see some supported here https://github.com/acmesh-official/acme.sh/wiki/Server
       Any other RFC8555-compliant CA should also be supported.
 
-      Currently supported are letsencrypt, letsencrypt_test, zerossl and Any other RFC8555-compliant CA should also be supported
+      Currently supported are letsencrypt, letsencrypt_test, zerossl and any other RFC8555-compliant CA should also be supported
       as long as it does not require any authentication or eab keys.
 
     default: "zerossl"

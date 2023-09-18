@@ -97,8 +97,14 @@ class AcmeshOperatorCharm(CharmBase):
             cwd=self.acmesh_install_dir,
         )
         check_call(
-            [self.acmesh_install_script, "--install", "--home", self.acmesh_home],
-            cwd=self.acmesh_source_dir,
+            [
+                self.acmesh_install_script, "--install",
+             "--home", self.acmesh_home,
+             "--config-home", self.acmesh_home,
+             "--cert-home", self.acmesh_home,
+             "--debug",
+             ],
+             cwd=self.acmesh_source_dir
         )
 
     def _on_config_changed(self, event: ConfigChangedEvent):
@@ -125,7 +131,10 @@ class AcmeshOperatorCharm(CharmBase):
         return use_email
 
     def _validate_email(self) -> str:
-        """Validate the email address."""
+        """Validate the email address.
+        
+            If the user has set use_email to true then validate the email. Otherwise return an empty email.
+        """
         email = self.model.config["email"].lower()
         if self.use_email:
             if not email:
@@ -154,11 +163,13 @@ class AcmeshOperatorCharm(CharmBase):
     def _register_account(self, email: str, server: str) -> None:
         """Register account with the specified server.
 
-        If their is already a registered account for the server there will not be an
+        If there is already a registered account for the server there will not be an
         error but if the email has changed then it will be updated.
         """
         try:
-            check_call([self.acmesh_script, "--register-account", "-m", email, "--server", server])
+            logger.info("registering account")
+            commands = [self.acmesh_script, "--register-account", "-m", email, "--server", server, "--debug"]
+            check_call(self.flatten_list(commands), cwd=self.acmesh_home)
         except CalledProcessError as e:
             logger.error(e)
             self.unit.status = BlockedStatus(f"Could not register account. Error: {e}")
@@ -169,10 +180,12 @@ class AcmeshOperatorCharm(CharmBase):
         # Assume that there is an email configured as that is being checked in config validation
         # Does the server have an active account?
         account_info = self._get_account_info_by_server(server=server)
+        logger.info(f"account_info: {account_info}")
         if not account_info:
             # Should register a new account with the email on server
             return True
         # We have an account, does it already have the provided email registered?
+
         if email in account_info:
             # There is already an account for the server with the provided email. Skip registration.
             return False
@@ -262,8 +275,7 @@ class AcmeshOperatorCharm(CharmBase):
         """Use acme.sh to get a certificate based on a csr."""
         csr_file_path = self._temporarily_save_file(content=csr, file_ending="csr")
         try:
-            check_call(
-                [
+            commands = [
                     self.acmesh_script,
                     "--signcsr",
                     "--csr",
@@ -275,6 +287,9 @@ class AcmeshOperatorCharm(CharmBase):
                     self.server,
                     "--force",
                 ]
+            check_call(
+                self.flatten_list(commands),
+                cwd=self.acmesh_home
             )
         except CalledProcessError as e:
             logger.error(e)
@@ -306,8 +321,7 @@ class AcmeshOperatorCharm(CharmBase):
             # key_file_path = f"{csr_dir_path}/{relation.app.name}.key.pem"
             ca_file_path = self._temporarily_save_file(content="", file_ending="ca")
             fullchain_file_path = self._temporarily_save_file(content="", file_ending="fullchain")
-            check_call(
-                [
+            commands = [
                     self.acmesh_script,
                     "--install-cert",
                     "-d",
@@ -319,6 +333,9 @@ class AcmeshOperatorCharm(CharmBase):
                     "--fullchain-file",
                     fullchain_file_path,
                 ]
+            check_call(
+                self.flatten_list(commands),
+                cwd=self.acmesh_home
             )
             with open(crt_file_path, "r") as crt_file:
                 certificate = crt_file.read()
@@ -365,7 +382,8 @@ class AcmeshOperatorCharm(CharmBase):
 
     def _revoke_certificate_by_domain(self, domain: str) -> None:
         """Revoke a certificate based on the domain name."""
-        check_call([self.acmesh_script, "--revoke", "-d", domain])
+        commands = [self.acmesh_script, "--revoke", "-d", domain]
+        check_call(self.flatten_list(commands), cwd=self.acmesh_home)
 
     def _revoke_certificate(self, csr: str, certificate: str) -> None:
         """Revoke a certificate."""
@@ -457,14 +475,28 @@ class AcmeshOperatorCharm(CharmBase):
         return path.join(self.acmesh_install_dir, "acme.sh", "acme.sh")
 
     @property
-    def acmesh_script(self) -> str:
+    def acmesh_script_path(self) -> str:
         """Absolute path to the acme.sh script."""
         return path.join(self.acmesh_home, "acme.sh")
+    
+    @property
+    def acmesh_script(self) -> list[str]:
+        """The acme.sh script to run in commands"""
+        return [self.acmesh_script_path, "--home", self.acmesh_home, "--config-home", self.acmesh_config_home]
 
     @property
     def acmesh_home(self) -> str:
         """Absolute path to the acme home dir."""
-        return path.join(self.acmesh_install_dir, ".acme.sh")
+        # Using the default /root/.acme.sh for now.
+        return "/root/.acme.sh"
+    
+    @property
+    def acmesh_config_home(self) -> str:
+        """Absolute path to the config home
+
+            For now same as the acmesh_home
+        """
+        return self.acmesh_home
 
     @property
     def use_email(self) -> bool:
@@ -495,6 +527,16 @@ class AcmeshOperatorCharm(CharmBase):
         if not ingress_address:
             return None
         return str(ingress_address)
+    
+    def flatten_list(self, command_list) -> list[str]:
+        """Flatten a list with nested list"""
+        flattened = []
+        for item in command_list:
+            if isinstance(item, list):
+                flattened.extend(self.flatten_list(item))
+            else:
+                flattened.append(item)
+        return flattened
 
 
 if __name__ == "__main__":

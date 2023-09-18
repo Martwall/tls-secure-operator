@@ -1,0 +1,11 @@
+{
+  "status":"valid",
+  "contact":["mailto:someemail@example.com"],
+  "orders":"https://pebble-dev.lxd:14000/list-orderz/3c28167cf8ea899d",
+  "key":{
+    "kty":"EC",
+    "crv":"P-256",
+    "x":"BBADo-sDpGmG-q6MK6wlTzpeM-tyJzanTMDMh0qfL2w",
+    "y":"hi96hgIjAA6E41QEg52Jt72Zb2iQiiss7DXXHVeB1pc"
+    }
+}
