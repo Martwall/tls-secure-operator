@@ -2,6 +2,8 @@
 
 To make contributions to this charm, you'll need a working [development setup](https://juju.is/docs/sdk/dev-setup).
 
+You need to have LXD and JuJu installed locally.
+
 You can create an environment for development with `tox`:
 
 ```shell

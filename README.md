@@ -10,23 +10,23 @@ Use links instead.
 
 # acmesh-operator
 
-Charmhub package name: operator-template
-More information: https://charmhub.io/acmesh-operator
+Charmhub package name: acmesh
+More information: https://charmhub.io/acmesh
 
 Describe your charm in one or two sentences.
 
 ## Limitations
 
-ONLY http-01 challenge.
+ONLY http-01 challenge in standalone mode.
 
-Does not support ip addresses in the certificate signing request (csr) because of how acme.sh handles issuing certificates from an existing csr.
+Does not support IP addresses in the certificate signing request (csr) because of how acme.sh handles issuing certificates from an existing csr.
 
 ## Settings
 
 Set the `expiry_notification_time` in `TLSCertificatesRequiresV2()` to (<CA's_max_lifetime> - 60 + 1) x 24.
 
 Why:
-acme.sh automatically by default renews certificates every 60 days. Since there is no connection/IPC (yet) between acme.sh and the charm code it is best to renew the certificates from charm code before acme.sh does. This is so that unecessary requests to the CA is avoided. So please set the `expiry_notification_time` on the requester side to the (CA's max lifetime - 60 + 1) x 24. Eg for zeroSSL that has 90 days lifetime set it to (90 - 60 + 1) x 24 = 744.
+acme.sh automatically by default renews certificates every 60 days. Since there is no connection/IPC (yet) between acme.sh and the charm code it is best to renew the certificates from charm code before acme.sh does. This is so that unnecessary requests to the CA is avoided. So please set the `expiry_notification_time` on the requester side to the (CA's max lifetime - 60 + 1) x 24. Eg for zeroSSL that has 90 days lifetime set it to (90 - 60 + 1) x 24 = 744.
 
 ## Certificate signing request
 
@@ -44,8 +44,6 @@ csr = generate_csr(private_key=private_key, subject=subject, sans_dns=sans_dns)
 ## Other resources
 
 <!-- If your charm is documented somewhere else other than Charmhub, provide a link separately. -->
-
-- [Read more](https://example.com)
 
 - [Contributing](CONTRIBUTING.md) <!-- or link to other contribution documentation -->
 

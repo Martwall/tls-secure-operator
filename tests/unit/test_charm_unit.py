@@ -12,7 +12,7 @@ from shutil import rmtree
 
 import ops
 import ops.testing
-from charm import AcmeshOperatorCharm
+from charm import KNOWN_CAS, AcmeshOperatorCharm
 
 from lib.charms.tls_certificates_interface.v2.tls_certificates import (
     generate_csr,
@@ -66,6 +66,12 @@ class TestCharm(unittest.TestCase):
             ops.BlockedStatus("Email cannot be empty when use-email is true"),
         )
 
+    def test_validate_debug_level(self):
+        self.harness.update_config({"debug-level": "INFO"})
+        self.assertIsInstance(self.harness.model.unit.status, ops.BlockedStatus)
+        self.harness.update_config({"debug-level": "2"})
+        self.assertIsInstance(self.harness.model.unit.status, ops.ActiveStatus)
+
     def test_config_use_email_in_combination_with_email(self):
         self.harness.update_config({"use-email": False, "email": ""})
         self.assertIsInstance(self.harness.model.unit.status, ops.ActiveStatus)
@@ -88,6 +94,49 @@ class TestCharm(unittest.TestCase):
         self.assertRaises(ValueError, self.harness.charm._validate_server, "http://acme.com/dir")
         valid_server = "https://acme.com/dir"
         self.assertEqual(self.harness.charm._validate_server(valid_server), valid_server)
+        # should require eab-kid and eab-hmac-key for some servers
+
+        google_server_url = KNOWN_CAS["google"]
+        ssl_com_server_url = KNOWN_CAS["sslcom_rsa"]
+        urls_to_validate = [google_server_url, ssl_com_server_url]
+        for url in urls_to_validate:
+            self.assertRaises(
+                ValueError,
+                self.harness.charm._validate_server,
+                url,
+            )
+        self.harness.update_config(
+            {
+                "use-email": True,
+                "email": "some_email+acmesh@example.com",
+                "server": "https://dv.acme-v02.api.pki.goog/directory",
+                "eab-kid": "some-eab-kid",
+                "eab-hmac-key": "some-hmac-key",
+            }
+        )
+        for url in urls_to_validate:
+            validated_server = self.harness.charm._validate_server(google_server_url)
+            self.assertEqual(validated_server, self.harness.charm.server)
+
+    def test_eab_kid_validation(self):
+        eab_kid = "891264iasudfhihu"
+        eab_hmac_key = ""
+        self.assertRaises(ValueError, self.harness.charm._validate_eab_kid, eab_kid, eab_hmac_key)
+        eab_hmac_key = "kjashdkfjhasdkfhuinnnbeuibcIUFDGIIDdjfhsd9879jshd"
+        eab_kid_validated = self.harness.charm._validate_eab_kid(eab_kid, eab_hmac_key)
+        self.assertEqual(eab_kid, eab_kid_validated)
+        self.assertEqual(self.harness.charm._validate_eab_hmac_key("", ""), "")
+
+    def test_eab_hmac_key_validation(self):
+        eab_kid = ""
+        eab_hmac_key = "kjashdkfjhasdkfhuinnnbeuibcIUFDGIIDdjfhsd9879jshd"
+        self.assertRaises(
+            ValueError, self.harness.charm._validate_eab_hmac_key, eab_hmac_key, eab_kid
+        )
+        eab_kid = "891264iasudfhihu"
+        eab_hmac_key_validated = self.harness.charm._validate_eab_hmac_key(eab_hmac_key, eab_kid)
+        self.assertEqual(eab_hmac_key, eab_hmac_key_validated)
+        self.assertEqual(self.harness.charm._validate_eab_hmac_key("", ""), "")
 
     def test_create_random_file(self):
         file_content = "This is some content"

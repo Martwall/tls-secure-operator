@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 
 INTERFACE_NAME = "signed-certificates"
 
+
 class DevRequirer(CharmBase):
     CSR_FILE_PATH = os.path.join(os.environ.get("JUJU_CHARM_DIR"), "request.csr")
 
@@ -68,9 +69,7 @@ class DevRequirer(CharmBase):
                 hostname = "dev-requirer"
             domain = hostname + ".lxd"
             sans_dns = [domain]
-            container_ip = str(
-                self.model.get_binding(INTERFACE_NAME).network.ingress_address
-            )
+            container_ip = str(self.model.get_binding(INTERFACE_NAME).network.ingress_address)
             logger.info(f"Hostname: {socket.gethostname()}")
             logger.info(f"THe fqdn is: {socket.getfqdn()}")
             logger.info(f"the domain is {domain}")

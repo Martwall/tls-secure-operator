@@ -180,7 +180,7 @@ class Lxc:
             logger.info(f"stderr: {result.stderr}")
 
     def _install_acmesh(self) -> None:
-        commands = [["./acme.sh", "--install", "-m", "example_mail@example.com"]]
+        commands = [["./acme.sh", "--install"]]
         for command in commands:
             result = self.instance.execute(command, cwd="/root/acme.sh")
             logger.info(f"result: {result.exit_code}")

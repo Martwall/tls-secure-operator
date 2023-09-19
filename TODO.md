@@ -6,5 +6,9 @@
 - [ x ] Add actions for create, renew, and revoke. This would also enable better integration testing of those actions.
 - [ ] Is it possible to check if the certificate has already been renewed by acme.sh before responding to a certificate_creation_request? This would avoid the need to set the configuration value of `expiry_notification_time`
 - [ ] Add dns validation
-- [ ] Add the possibilty to add EAB credentials in acme.sh and in the config.
+- [ x ] Add the possibility to add EAB credentials in acme.sh and in the config.
+- [ x ] Add support for Buypass and ssl.com
 - [ ] Handle adding the days flag for [buypass](https://github.com/acmesh-official/acme.sh/wiki/BuyPass.com-CA)
+- [ ] Add possibility to use ECC keys
+- [ ] Set a debug option
+- [ ] Handle log option

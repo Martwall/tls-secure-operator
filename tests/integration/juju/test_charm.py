@@ -2,7 +2,6 @@
 # Copyright 2023 Martwall
 # See LICENSE file for licensing details.
 
-import asyncio
 import logging
 from pathlib import Path
 
@@ -82,7 +81,7 @@ async def test_smoke(ops_test: OpsTest):
 
     Assert on the unit status before any relations/configurations take place.
     """
-    # Add a machine before so that certificates can be transfered to it
+    # Add a machine before so that certificates can be transferred to it
     await ops_test.model.add_machine()
     await ops_test.model.block_until(lambda: len(ops_test.model.machines) > 0, timeout=60)
     machine_list: list(str) = await ops_test.model.get_machines()

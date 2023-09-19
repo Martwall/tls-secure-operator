@@ -19,11 +19,19 @@ options:
 
   email:
     description: |
-      Configures the email used for registering with the certificate provider.
+      Configures the email used for registering with the certificate provider (CA).
 
       This is the email to which you will get certificate expiring notices and if you have
       registered with a provider it is the account email. Please also see the use-email config
       option.
+
+      An email is required for:
+        - zerossl (if not using EAB credentials)
+        - sslcom_rsa
+        - buypass
+        - buypass_test
+        - google
+        - googletest
 
     default: ""
     type: string
@@ -32,12 +40,70 @@ options:
     description: |
       Configures the ACME server directory URL.
 
-      Please see some supported here https://github.com/acmesh-official/acme.sh/wiki/Server
+      Please see acme.sh supported here https://github.com/acmesh-official/acme.sh/wiki/Server
       Any other RFC8555-compliant CA should also be supported.
 
-      Currently supported are letsencrypt, letsencrypt_test, zerossl and any other RFC8555-compliant CA should also be supported
-      as long as it does not require any authentication or eab keys.
+      Currently supported in the charm are:
+        - letsencrypt
+        - letsencrypt_test
+        - buypass
+        - buypass_test
+        - zerossl
+        - sslcom_rsa
+        - google
+        - googletest
+        - any other RFC8555-compliant CA should also be supported.
 
     default: "zerossl"
     type: string
-    
+
+  eab-kid:
+    description: |
+      EAB key id from the certificate service provider. See the acme.sh wiki or each service provider's webpage for
+      information on how to generate the EAB credentials.
+
+      If the values for eab-kid and eab-hmac-key are not empty there will be an attempt to use them in combination 
+      with the server and in some cases also the email address.
+
+      If any non-standard supported CA is used an account will attempt to be created using the email and the eab credentials,
+      if there are eab credentials otherwise only the email will be used. If use-email is false and empty email is used.
+      For standard supported CAs see the config option "server".
+
+      EAB credentials are:
+        - Required for CAs:
+          - google
+          - googletest
+          - sslcom_rsa
+        - Optional for CAs:
+          - zerossl
+        - Unused for CAs:
+          - letsencrypt
+          - letsencrypt_test
+          - buypass
+          - buypass_test
+
+    default: ""
+    type: string
+
+  eab-hmac-key:
+    description: |
+      EAB hmac key from the certificate service provider. 
+
+      Also see the eab-kid config value description.
+
+    default: ""
+    type: string
+
+  debug:
+    description: |
+      Use debugging to show more command output.
+
+    default: false
+    type: boolean
+
+  debug-level:
+    description: |
+      The debug level to use. 0, 1, 2 or 3 
+
+    default: "1"
+    type: string
