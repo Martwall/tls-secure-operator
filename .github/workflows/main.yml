@@ -24,4 +24,5 @@ jobs:
       - name: Run format, lint and unit tests
         run: |
           echo "PYTHONPATH=$PYTHONPATH:$GITHUB_WORKSPACE/lib"
+          ls
           tox run -e unit
