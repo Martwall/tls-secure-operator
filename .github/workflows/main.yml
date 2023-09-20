@@ -12,7 +12,7 @@ on:
 jobs:
   unit-test:
     name: Format, lint and unit test
-    runs-on: ubuntu-jammy
+    runs-on: ubuntu-22.04
     timeout-minutes: 5
     steps:
       - name: Checkout
