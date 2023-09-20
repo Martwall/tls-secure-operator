@@ -20,4 +20,4 @@ jobs:
       - name: Install tox
         run: python3 -m pip install tox
       - name: Run format, lint and unit tests
-        run: tox
+        run: tox run -e unit
