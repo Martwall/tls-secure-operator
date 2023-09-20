@@ -3,7 +3,7 @@
 
 # The charm package name, no spaces (required)
 # See https://juju.is/docs/sdk/naming#heading--naming-charms for guidance.
-name: acmesh-operator
+name: acmesh
  
 # The following metadata are human-readable and will be published prominently on Charmhub.
 
@@ -11,7 +11,7 @@ name: acmesh-operator
 display-name: acme.sh
 
 # (Required)
-summary: acme.sh - An ACME protocol client 
+summary: acme.sh - An ACME protocol client as a subordinate charm
 
 description: |
   An ACME protocol client.
@@ -22,6 +22,22 @@ description: |
 
   Charms needing signed TLS certificates.
 
+maintainers:
+  - Martwall
+
+source: https://github.com/Martwall/acmesh-operator
+issues: https://github.com/Martwall/acmesh-operator/issues
+website:
+  - https://github.com/acmesh-official/acme.sh
+
+# Subordinate units inherit the public/private address of the principal application. The container of the principal defines the network setup.
+subordinate: true
+
 provides:
-  signedcertificates:
+  signed-certificates:
     interface: tls-certificates
+    scope: container # Important for subordinate
+requires:
+  juju-info:
+    interface: juju-info
+    scope: container # Important for subordinate

@@ -1,0 +1,26 @@
+create-certificate:
+  description: >
+    Create a certificate from a csr
+  params:
+    csr:
+      type: string
+      description: Certificate signing request
+  required: [csr]
+
+renew-certificate:
+  description: >
+    Renew a certificate from a csr. A certificate needs to have been created first.
+  params:
+    csr:
+      type: string
+      description: Certificate signing request
+  required: [csr]
+
+revoke-certificate:
+  description: >
+    Revoke a certificate for a domain
+  params:
+    domain:
+      type: string
+      description: The domain to revoke the certificate for.
+  required: [domain]

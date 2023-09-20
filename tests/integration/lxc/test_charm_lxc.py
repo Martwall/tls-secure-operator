@@ -81,7 +81,7 @@ class TestCharm(unittest.TestCase):
     def setUp(self):
         self.harness = ops.testing.Harness(AcmeshOperatorCharm)
         self.harness.set_model_name("testing-acmesh-operator")
-        self.relation_name = "signedcertificates"
+        self.relation_name = "signed-certificates"
         self.remote_app = "signed-certs-requirer"
         self.remote_unit_name = "signed-certs-requirer/0"
         self.relation_id = self.harness.add_relation(self.relation_name, self.remote_app)
@@ -110,7 +110,7 @@ class TestCharm(unittest.TestCase):
 
     def test_domain_from_csr_raises_error(self):
         reinstall_acmesh()
-        self.assertRaises(CalledProcessError, self.harness.charm._domain_from_csr, "invalid csr")
+        self.assertRaises(ValueError, self.harness.charm._domain_from_csr, "invalid csr")
 
     def test_certificate_from_csr(self):
         reinstall_acmesh()
