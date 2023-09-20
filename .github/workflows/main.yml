@@ -1,0 +1,23 @@
+# Copyright 2023 Martwall
+# See LICENSE file for licensing details.
+name: Tests
+
+on:
+  pull_request:
+    branches:
+      - master
+  push:
+    branches:
+      - dev
+jobs:
+  unit-test:
+    name: Format, lint and unit test
+    runs-on: ubuntu-jammy
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      - name: Install tox
+        run: python3 -m pip install tox
+      - name: Run format, lint and unit tests
+        run: tox
