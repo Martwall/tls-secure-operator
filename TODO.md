@@ -13,5 +13,5 @@
 - [ x ] Set a debug option
 - [ ] Handle log option
 - [ ] Make the standalone server http port configurable
-- [ ] Should the cron-job be turned off
+- [ ] Should the cron-job be turned off?
 - [ ] Should the automatic updating of the acme.sh script be turned off
