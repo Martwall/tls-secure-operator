@@ -13,8 +13,7 @@ from shutil import rmtree
 import ops
 import ops.testing
 from charm import KNOWN_CAS, AcmeshOperatorCharm
-
-from lib.charms.tls_certificates_interface.v2.tls_certificates import (
+from charms.tls_certificates_interface.v2.tls_certificates import (
     generate_csr,
     generate_private_key,
 )
