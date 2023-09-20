@@ -4,13 +4,13 @@
 #
 # Learn more at: https://juju.is/docs/sdk
 """This is a docstring."""
-# TODO: BlockedStatus is never set from the charm code https://juju.is/docs/sdk/constructs#heading--statuses
+
 import logging
 from os import environ, path, remove
 from os.path import exists
 from re import compile, fullmatch
 from secrets import token_urlsafe
-from subprocess import CalledProcessError, check_call
+from subprocess import CalledProcessError, check_call, check_output
 from typing import TypedDict
 from urllib.parse import urlparse
 
@@ -78,7 +78,6 @@ class AcmeshOperatorCharm(CharmBase):
         )
 
     def _on_install(self, event: InstallEvent) -> None:
-        logger.info("Installing acme.sh")
         self.unit.status = MaintenanceStatus("Installing acme.sh")
         try:
             self._install_acmesh()
@@ -109,6 +108,18 @@ class AcmeshOperatorCharm(CharmBase):
             ],
             cwd=self.acmesh_source_dir,
         )
+        self.unit.set_workload_version(self._get_acmesh_version())
+
+    def _get_acmesh_version(self) -> str:
+        """Get the acme.sh version."""
+        all_version_output = check_output(
+            [self.acmesh_install_script, "--version"], text=True, cwd=self.acmesh_source_dir
+        )
+        only_version_output = check_output(
+            ["tail", "-n", "-1"], input=all_version_output, text=True
+        )
+        version = only_version_output.replace("\n", "").replace("v", "")
+        return version
 
     def _on_config_changed(self, event: ConfigChangedEvent):
         """Handle changed configuration.
@@ -224,7 +235,6 @@ class AcmeshOperatorCharm(CharmBase):
         error but if the email has changed then it will be updated.
         """
         try:
-            logger.info("registering account")
             if "zerossl" in server:
                 if self.eab_kid and self.eab_hmac_key and self.email:
                     commands = self._register_account_with_email_and_credentials_commands(
@@ -322,7 +332,6 @@ class AcmeshOperatorCharm(CharmBase):
         # Assume that there is an email configured as that is being checked in config validation
         # Does the server have an active account?
         account_info = self._get_account_info_by_server(server=server)
-        logger.info(f"account_info: {account_info}")
         if not account_info:
             # Should register a new account with the email on server
             return True

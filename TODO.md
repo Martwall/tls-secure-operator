@@ -10,5 +10,8 @@
 - [ x ] Add support for Buypass and ssl.com
 - [ ] Handle adding the days flag for [buypass](https://github.com/acmesh-official/acme.sh/wiki/BuyPass.com-CA)
 - [ ] Add possibility to use ECC keys
-- [ ] Set a debug option
+- [ x ] Set a debug option
 - [ ] Handle log option
+- [ ] Make the standalone server http port configurable
+- [ ] Should the cron-job be turned off
+- [ ] Should the automatic updating of the acme.sh script be turned off

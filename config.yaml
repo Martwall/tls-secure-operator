@@ -12,7 +12,7 @@ options:
       be set in the config before issuing a certificate. If set to false, no email is required to start
       issuing certificates.
 
-      Set to to false to not use an email.
+      Set to to false to not use an email. (Only letsencrypt does not require an email)
 
     default: true
     type: boolean
@@ -23,7 +23,7 @@ options:
 
       This is the email to which you will get certificate expiring notices and if you have
       registered with a provider it is the account email. Please also see the use-email config
-      option.
+      option. If the email is changed it will be updated and used for subsequent requests to the CA.
 
       An email is required for:
         - zerossl (if not using EAB credentials)
