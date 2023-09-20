@@ -10,8 +10,8 @@ on:
     branches:
       - dev
 jobs:
-  unit-test:
-    name: Format, lint and unit test
+  lint:
+    name: Lint
     runs-on: ubuntu-22.04
     timeout-minutes: 5
     steps:
@@ -19,5 +19,17 @@ jobs:
         uses: actions/checkout@v3
       - name: Install tox
         run: python3 -m pip install tox
-      - name: Run format, lint and unit tests
-        run: tox
+      - name: Run linting
+        run: tox run -e lint
+  
+  unit-test:
+    name: Unit test
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      - name: Install tox
+        run: python3 -m pip install tox
+      - name: Run unit tests
+        run: tox run -e unit
