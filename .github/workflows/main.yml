@@ -23,6 +23,7 @@ jobs:
         run: echo "PYTHONPATH=$PYTHONPATH:$GITHUB_WORKSPACE/lib" >> $GITHUB_ENV
       - name: Run format, lint and unit tests
         run: |
-          echo "PYTHONPATH=$PYTHONPATH:$GITHUB_WORKSPACE/lib"
+          export PYTHONPATH=$PYTHONPATH:$GITHUB_WORKSPACE/lib
+          echo "$PYTHONPATH"
           ls
           tox run -e unit
