@@ -19,6 +19,8 @@ Integrates to a principal requirer charm via the "tls-certificates" interface an
 
 ## Limitations
 
+ONLY use ONE instance of the charm
+
 ONLY http-01 challenge in standalone mode.
 
 ONLY rsa certificates.

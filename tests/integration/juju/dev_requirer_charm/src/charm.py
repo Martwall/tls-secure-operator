@@ -68,23 +68,19 @@ class DevRequirer(CharmBase):
                 logger.error(f"THe fqdn is: {socket.getfqdn()}")
                 hostname = "dev-requirer"
             domain = hostname + ".lxd"
+            # This is to simulate when a dns is used for the proxy container and not the container.
+            # Like pointing a subdomain to the IP address of the host where haproxy is running.
+            if os.path.exists("/root/haproxy_juju_fqdn"):
+                with open("/root/haproxy_juju_fqdn", "r") as fqdn_file:
+                    domain = fqdn_file.read()
+
             sans_dns = [domain]
             container_ip = str(self.model.get_binding(INTERFACE_NAME).network.ingress_address)
             logger.info(f"Hostname: {socket.gethostname()}")
             logger.info(f"THe fqdn is: {socket.getfqdn()}")
             logger.info(f"the domain is {domain}")
             logger.info(f"The container ip is: {container_ip}")
-            # Acme.sh does not seem to support IP address assignment,
-            # perhaps a workaround could be used by filtering and checking
-            # the contents of the csr first.
-            # if container_ip:
-            #     csr = generate_csr(
-            #         private_key=private_key,
-            #         subject=domain,
-            #         sans_ip=[container_ip],
-            #         sans_dns=sans_dns,
-            #     )
-            # else:
+            
             csr = generate_csr(
                 private_key=private_key,
                 subject=domain,

@@ -87,13 +87,13 @@ class TestCharm(unittest.TestCase):
         self.relation_id = self.harness.add_relation(self.relation_name, self.remote_app)
         self.harness.update_config({"use-email": True})
         self.harness.update_config({"email": "someone@example.com"})
+        self.harness.update_config({"debug": True})
         # Pebble testing server ACME directory url
         self.harness.update_config({"server": "https://localhost:14000/dir"})
         self.addCleanup(self.harness.cleanup)
         self.harness.begin()
 
         self.harness.add_relation_unit(self.relation_id, self.remote_unit_name)
-        self.harness.charm.HTTPPORT = "5002"
         self.harness.charm._ACMESH_INSTALL_DIR = "/root"
         # Get a valid csr to use for testing
         with open("/root/server.csr", "r") as csr_file:
@@ -143,7 +143,11 @@ class TestCharm(unittest.TestCase):
                 ]
             )
         }
+        # TODO: This is not working! Certificate is no available by doing this.
+        # perhaps because the certs are deleted immediately after they are created or
+        # perhaps because it is not triggering the creation of certificates.
         self.harness.update_relation_data(self.relation_id, self.remote_unit_name, key_values)
+
         # Certs should now be available. Test revocation
         with open("/root/.acme.sh/localhost/localhost.cer") as certificate_file:
             crt = certificate_file.read()

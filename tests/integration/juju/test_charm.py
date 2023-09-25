@@ -2,10 +2,14 @@
 # Copyright 2023 Martwall
 # See LICENSE file for licensing details.
 
+import asyncio
+import datetime
 import logging
+import os
 from pathlib import Path
 
 import pytest
+import pytest_asyncio
 import yaml
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
@@ -14,6 +18,7 @@ from cryptography.x509.oid import NameOID
 from juju.action import Action
 from juju.application import Application
 from juju.machine import Machine
+from juju.model import Model
 from juju.unit import Unit
 from pylxd import Client
 from pytest_operator.plugin import OpsTest
@@ -75,12 +80,12 @@ def create_csr(common_name: str):
     return request.public_bytes(serialization.Encoding.PEM)
 
 
-@pytest.mark.abort_on_fail
-async def test_smoke(ops_test: OpsTest):
-    """Build the charm-under-test and deploy it together with related charms.
+@pytest_asyncio.fixture(scope="module")
+async def setup_juju(ops_test: OpsTest):
+    requirer_charm = await build_the_dev_requirer(ops_test)
+    #### Build and deploy acmesh-operator from local source folder ####
+    acmesh_charm = await ops_test.build_charm(".")
 
-    Assert on the unit status before any relations/configurations take place.
-    """
     # Add a machine before so that certificates can be transferred to it
     await ops_test.model.add_machine()
     await ops_test.model.block_until(lambda: len(ops_test.model.machines) > 0, timeout=60)
@@ -98,34 +103,131 @@ async def test_smoke(ops_test: OpsTest):
     lxd_instance_name = machine0.hostname
     logger.info(lxd_instance_name)
     lxd_tasks(lxd_instance_name)
+    assert isinstance(machine0_id, str)
 
-    #### Build and deploy dev requirer charm ####
-    requirer_charm = await ops_test.build_charm("./tests/integration/juju/dev_requirer_charm")
-    requirer_app: Application = await ops_test.model.deploy(
-        requirer_charm, num_units=1, application_name=REQUIRER_APP_NAME, to=str(machine0_id)
+    return {
+        "machine_id": machine0_id,
+        "machine_hostname": machine0.hostname,
+        "acmesh_charm": acmesh_charm,
+        "requirer_charm": requirer_charm,
+    }
+
+
+async def build_the_dev_requirer(ops_test: OpsTest) -> None:
+    """Build the dev requirer charm if it does not already exist.
+
+    This means that if changes are made to the dev requirer the charm executable should be removed.
+    """
+    if os.path.exists("./dev-requirer_ubuntu-22.04-amd64.charm"):
+        logger.info("Skipping building of dev-requirer charm because of existing charm in workspace folder. Delete to have it rebuilt.")
+        return "./dev-requirer_ubuntu-22.04-amd64.charm"
+    return await ops_test.build_charm("./tests/integration/juju/dev_requirer_charm")
+
+
+async def deploy_dev_requirer(charm: Path, model: Model) -> Application:
+    """Deploy the dev requirer and wait until it is active."""
+    requirer_app: Application = await model.deploy(
+        charm, num_units=1, application_name=REQUIRER_APP_NAME
     )
-    await ops_test.model.block_until(
-        lambda: requirer_app.status in ("active", "error"), timeout=180
-    )
+    await model.block_until(lambda: requirer_app.status in ("active", "error"), timeout=180)
 
     assert requirer_app.status == "active"
+    return requirer_app
 
-    #### Build and deploy subordinate acmesh-operator from local source folder ####
-    charm = await ops_test.build_charm(".")
-    acmesh_config = {"email": "tester@testingtests.com", "server": PEBBLE_DEV_SERVER_URL}
-    app: Application = await ops_test.model.deploy(
-        charm, num_units=0, application_name=ACMESH_APP_NAME, config=acmesh_config
+
+async def deploy_tls_secure(model: Model, charm_path: Path, to_machine: str) -> Application:
+    """Deploy the tls secure application."""
+    _config = {"email": "tester@testingtests.com", "server": PEBBLE_DEV_SERVER_URL}
+    app: Application = await model.deploy(
+        charm_path,
+        num_units=1,
+        application_name=ACMESH_APP_NAME,
+        config=_config,
+        to=to_machine,
     )
+    return app
+
+async def deploy_haproxy(model: Model) -> Application:
+    haproxy_config = {"services": "", "source": "ppa:vbernat/haproxy-2.4"}
+    haproxy_charm: Application = await model.deploy(
+        "haproxy", config=haproxy_config, num_units=1, series="jammy"
+    )
+
+    await model.wait_for_idle()
+
+    assert haproxy_charm.status == "active"
+
+    return haproxy_charm
+
+async def transfer_haproxy_fqdn_to_dev_requirer(model: Model) -> None:
+    """Transfer the haproxy charm fqdn to the dev requirer so that the fqdn is used as the domain name in csr generation.
+        This has to be done before the dev_requirer joins the signed-certificates relation as it will otherwise
+        use it own fqdn in the csr and the pebble-dev server will send the acme challenge there instead.
+    """
+    application_keys = model.applications.keys()
+    if "haproxy" in application_keys and "dev-requirer" in application_keys:
+        haproxy_app: Application = model.applications["haproxy"]
+        requirer_app: Application = model.applications["dev-requirer"]
+        haproxy_unit_machine_id: str = haproxy_app.units[0].machine_id
+        requirer_unit_machine_id: str = requirer_app.units[0].machine_id
+        haproxy_machine: Machine = model.machines[haproxy_unit_machine_id]
+        requirer_machine: Machine = model.machines[requirer_unit_machine_id]
+        lxd_client = Client()
+        haproxy_fqdn = haproxy_machine.hostname + ".lxd"
+        requirer_lxd_instance = lxd_client.instances.get(requirer_machine.hostname)
+        requirer_lxd_instance.files.put("/root/haproxy_juju_fqdn", bytes(haproxy_fqdn, "utf-8"))
+    else:
+        logger.info(f"Could not transfer haproxy charm fqdn to dev-requirer because the charms did not exist. Applications {application_keys}]")
+        return 
+
+@pytest_asyncio.fixture(scope="function")
+async def deploy_dev_requirer_and_tls_secure(ops_test: OpsTest, setup_juju: dict) -> dict:
+    """Deploy the dev requirer an the tls secure application
+    
+        And cleaning up after every test function
+    """
+    tls_secure_app = await deploy_tls_secure(
+        ops_test.model, setup_juju["acmesh_charm"], setup_juju["machine_id"]
+    )
+    requirer_app = await deploy_dev_requirer(setup_juju["requirer_charm"], ops_test.model)
+
+    assert requirer_app.status == "active"
+    assert tls_secure_app.status == "active"
+
+    yield {
+        "requirer_app": requirer_app,
+        "tls_secure_app": tls_secure_app,
+        "machine0_id": setup_juju["machine_id"],
+        "machine0_hostname": setup_juju["machine_hostname"]
+    }
+
+    requirer_app.entity_id
+    await ops_test.model.remove_application(requirer_app.entity_id, block_until_done=True)
+    await ops_test.model.remove_application(tls_secure_app.entity_id, block_until_done=True)
+
+
+@pytest.mark.skip
+@pytest.mark.abort_on_fail
+@pytest.mark.asyncio
+async def test_relation_and_certificate_generation(ops_test: OpsTest, deploy_dev_requirer_and_tls_secure: dict):
+    """Build the charm-under-test and deploy it together with related charms.
+
+    Assert on the unit status before any relations/configurations take place.
+    """
+    requirer_app: Application = deploy_dev_requirer_and_tls_secure["requirer_app"]
+
+    app: Application = deploy_dev_requirer_and_tls_secure["tls_secure_app"]
+
     # Relate the two applications
     # The requirer app will ask for a certificate
-    await ops_test.model.add_relation(ACMESH_APP_NAME, REQUIRER_APP_NAME)
+    await ops_test.model.add_relation(app.entity_id, requirer_app.entity_id)
     await ops_test.model.wait_for_idle(apps=[ACMESH_APP_NAME, REQUIRER_APP_NAME])
 
     # TODO: Checkout the relation data
 
     # Test running the certificate actions
     fqdn = (
-        lxd_instance_name + ".lxd"
+        setup_juju["machine_hostname"] + ".lxd"
     )  # Should be the address to the machine where acmesh-operator is running
     csr = create_csr(fqdn).decode().strip()
     u: Unit = app.units[0]
@@ -142,3 +244,58 @@ async def test_smoke(ops_test: OpsTest):
 
     assert app.status == "active"
     assert requirer_app.status == "active"
+
+@pytest.mark.abort_on_fail
+@pytest.mark.asyncio
+async def test_connection_with_haproxy(ops_test: OpsTest, deploy_dev_requirer_and_tls_secure: dict) -> Application:
+    """Test connection to Haproxy."""
+
+    requirer_app: Application = deploy_dev_requirer_and_tls_secure["requirer_app"]
+    tls_secure_app: Application = deploy_dev_requirer_and_tls_secure["tls_secure_app"]
+
+    haproxy_charm = await deploy_haproxy(ops_test.model)
+    await transfer_haproxy_fqdn_to_dev_requirer(ops_test.model)
+
+    assert haproxy_charm.status == "active"
+
+    await ops_test.model.add_relation(tls_secure_app.entity_id, haproxy_charm.entity_id)
+    await ops_test.model.wait_for_idle(apps=[tls_secure_app.entity_id, haproxy_charm.entity_id])
+
+    assert tls_secure_app.status == "active"
+    assert haproxy_charm.status == "active"
+
+@pytest.mark.skip
+@pytest.mark.abort_on_fail
+@pytest.mark.asyncio
+async def test_connection_with_haproxy(ops_test: OpsTest) -> Application:
+    """Test connection to Haproxy."""
+
+    haproxy_charm = await deploy_haproxy(ops_test.model)
+
+    assert haproxy_charm.status == "active"
+
+
+
+
+
+@pytest_asyncio.fixture(scope="module")
+async def test_fixture() -> str:
+    logger.info(f"Fixture time: {datetime.datetime.now()}")
+    await asyncio.sleep(5)
+    return "hello"
+
+
+@pytest.mark.skip
+@pytest.mark.asyncio
+async def test_async_fixture(ops_test: OpsTest, test_fixture: str):
+    """Some other test."""
+    logger.info(f"test_async_fixture: {datetime.datetime.now()}")
+    assert test_fixture == "hello"
+
+
+@pytest.mark.skip
+@pytest.mark.asyncio
+async def test_async_fixture_2(ops_test: OpsTest, test_fixture: str):
+    """Some other test."""
+    logger.info(f"test_async_fixture_2: {datetime.datetime.now()}")
+    assert test_fixture == "hello"

@@ -107,3 +107,14 @@ options:
 
     default: "1"
     type: string
+
+  haproxy-service-options:
+    description: |
+      Haproxy service_options as a comma separated list of options.
+
+      See https://bazaar.launchpad.net/~haproxy-team/charm-haproxy/trunk/view/head:/README.md for more information
+
+    default: "mode http, 
+              acl is_acme_challenge path_beg -i /.well-known/acme-challenge/, 
+              http-request redirect scheme https if !{ ssl_fc } !is_acme_challenge"
+    type: string

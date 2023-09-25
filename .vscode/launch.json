@@ -19,7 +19,27 @@
       ],
       "cwd": "${workspaceFolder}",
       "env": {
-          "PYTHONPATH": "${workspaceFolder}/lib:{workspaceFolder}/src"
+          "PYTHONPATH": "${workspaceFolder}/lib:${workspaceFolder}/src"
+      },
+      "console": "integratedTerminal",
+      "stopOnEntry": false,
+      "justMyCode": false,
+    },
+    {
+      "name": "Python Debug unit tests",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/venv/bin/pytest",
+      "args": [
+          "--tb",
+          "native",
+          "-v",
+          "-s",
+          "${workspaceFolder}/tests/unit"
+      ],
+      "cwd": "${workspaceFolder}",
+      "env": {
+          "PYTHONPATH": "${workspaceFolder}/lib:${workspaceFolder}/src"
       },
       "console": "integratedTerminal",
       "stopOnEntry": false,

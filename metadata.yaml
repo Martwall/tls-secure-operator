@@ -31,13 +31,10 @@ website:
   - https://github.com/acmesh-official/acme.sh
 
 # Subordinate units inherit the public/private address of the principal application. The container of the principal defines the network setup.
-subordinate: true
+subordinate: false
 
 provides:
   signed-certificates:
     interface: tls-certificates
-    scope: container # Important for subordinate
-requires:
-  juju-info:
-    interface: juju-info
-    scope: container # Important for subordinate
+  haproxy: # Used to connect the application to a Haproxy application
+    interface: http
