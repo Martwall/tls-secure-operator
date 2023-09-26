@@ -108,6 +108,20 @@ options:
     default: "1"
     type: string
 
+  proxy-service:
+    description: |
+      The proxy service to use. 
+
+      This means that if another charm is related to this it will wait to issue the certificate until
+      the proxy relation has been established. If using "none" as the proxy service the charm will attempt
+      to issue the certificate but the requirer charm (or operator) has to make sure the acme challenge for the http-01
+      challenge will succeed.  
+
+      Currently supported are "haproxy", "none"
+
+    default: "haproxy"
+    type: string
+
   haproxy-service-options:
     description: |
       Haproxy service_options as a comma separated list of options.

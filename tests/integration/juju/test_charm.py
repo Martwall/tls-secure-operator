@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 import pytest_asyncio
 import yaml
+import ops
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
@@ -81,33 +82,11 @@ def create_csr(common_name: str):
 
 
 @pytest_asyncio.fixture(scope="module")
-async def setup_juju(ops_test: OpsTest):
+async def build_charms(ops_test: OpsTest):
     requirer_charm = await build_the_dev_requirer(ops_test)
-    #### Build and deploy acmesh-operator from local source folder ####
     acmesh_charm = await ops_test.build_charm(".")
 
-    # Add a machine before so that certificates can be transferred to it
-    await ops_test.model.add_machine()
-    await ops_test.model.block_until(lambda: len(ops_test.model.machines) > 0, timeout=60)
-    machine_list: list(str) = await ops_test.model.get_machines()
-    logger.info(machine_list)
-    machine0_id: str = machine_list[0]
-    machine0: Machine = ops_test.model.machines[machine0_id]
-
-    logger.info(machine0.agent_status)  # This is State in juju status
-    logger.info(
-        machine0.status
-    )  # This is the Message but as short eg status_message = Running -> status = running
-    logger.info(machine0.safe_data)  # all machine data
-    await ops_test.model.block_until(lambda: machine0.hostname is not None, timeout=160)
-    lxd_instance_name = machine0.hostname
-    logger.info(lxd_instance_name)
-    lxd_tasks(lxd_instance_name)
-    assert isinstance(machine0_id, str)
-
     return {
-        "machine_id": machine0_id,
-        "machine_hostname": machine0.hostname,
         "acmesh_charm": acmesh_charm,
         "requirer_charm": requirer_charm,
     }
@@ -119,7 +98,9 @@ async def build_the_dev_requirer(ops_test: OpsTest) -> None:
     This means that if changes are made to the dev requirer the charm executable should be removed.
     """
     if os.path.exists("./dev-requirer_ubuntu-22.04-amd64.charm"):
-        logger.info("Skipping building of dev-requirer charm because of existing charm in workspace folder. Delete to have it rebuilt.")
+        logger.info(
+            "Skipping building of dev-requirer charm because of existing charm in workspace folder. Delete to have it rebuilt."
+        )
         return "./dev-requirer_ubuntu-22.04-amd64.charm"
     return await ops_test.build_charm("./tests/integration/juju/dev_requirer_charm")
 
@@ -134,35 +115,40 @@ async def deploy_dev_requirer(charm: Path, model: Model) -> Application:
     assert requirer_app.status == "active"
     return requirer_app
 
+async def add_machine_for_tls_secure(model: Model) -> Machine:
+    """This is needed for the acme.sh curl invocation to trust the self-signed certificates
+    of the pebble dev server"""
+    # Add a machine before so that certificates can be transferred to it
+    machine: Machine = await model.add_machine()
+    await model.block_until(lambda: machine.hostname is not None, timeout=160)
+    lxd_instance_name = machine.hostname
+    logger.info(lxd_instance_name)
+    lxd_tasks(lxd_instance_name)
 
-async def deploy_tls_secure(model: Model, charm_path: Path, to_machine: str) -> Application:
+    return machine
+
+async def deploy_tls_secure(model: Model, charm_path: Path) -> dict:
     """Deploy the tls secure application."""
-    _config = {"email": "tester@testingtests.com", "server": PEBBLE_DEV_SERVER_URL}
+    machine = await add_machine_for_tls_secure(model)
+    _config = {"email": "tester@testingtests.com", "server": PEBBLE_DEV_SERVER_URL, "debug": True}
     app: Application = await model.deploy(
         charm_path,
         num_units=1,
         application_name=ACMESH_APP_NAME,
         config=_config,
-        to=to_machine,
+        to=machine.entity_id,
     )
-    return app
+    return {
+        "app": app,
+        "machine": machine
+        }
 
-async def deploy_haproxy(model: Model) -> Application:
-    haproxy_config = {"services": "", "source": "ppa:vbernat/haproxy-2.4"}
-    haproxy_charm: Application = await model.deploy(
-        "haproxy", config=haproxy_config, num_units=1, series="jammy"
-    )
-
-    await model.wait_for_idle()
-
-    assert haproxy_charm.status == "active"
-
-    return haproxy_charm
 
 async def transfer_haproxy_fqdn_to_dev_requirer(model: Model) -> None:
     """Transfer the haproxy charm fqdn to the dev requirer so that the fqdn is used as the domain name in csr generation.
-        This has to be done before the dev_requirer joins the signed-certificates relation as it will otherwise
-        use it own fqdn in the csr and the pebble-dev server will send the acme challenge there instead.
+
+    This has to be done before the dev_requirer joins the signed-certificates relation as it will otherwise
+    use it own fqdn in the csr and the pebble-dev server will send the acme challenge there instead.
     """
     application_keys = model.applications.keys()
     if "haproxy" in application_keys and "dev-requirer" in application_keys:
@@ -177,19 +163,24 @@ async def transfer_haproxy_fqdn_to_dev_requirer(model: Model) -> None:
         requirer_lxd_instance = lxd_client.instances.get(requirer_machine.hostname)
         requirer_lxd_instance.files.put("/root/haproxy_juju_fqdn", bytes(haproxy_fqdn, "utf-8"))
     else:
-        logger.info(f"Could not transfer haproxy charm fqdn to dev-requirer because the charms did not exist. Applications {application_keys}]")
-        return 
+        logger.info(
+            f"Could not transfer haproxy charm fqdn to dev-requirer because the charms did not exist. Applications {application_keys}]"
+        )
+        return
+
 
 @pytest_asyncio.fixture(scope="function")
-async def deploy_dev_requirer_and_tls_secure(ops_test: OpsTest, setup_juju: dict) -> dict:
-    """Deploy the dev requirer an the tls secure application
-    
-        And cleaning up after every test function
+async def deploy_dev_requirer_and_tls_secure(ops_test: OpsTest, build_charms: dict) -> dict:
+    """Deploy the dev requirer an the tls secure application with default config.
+
+    And cleaning up after every test function.
     """
-    tls_secure_app = await deploy_tls_secure(
-        ops_test.model, setup_juju["acmesh_charm"], setup_juju["machine_id"]
+    tls_secure_deployment = await deploy_tls_secure(
+        ops_test.model, build_charms["acmesh_charm"]
     )
-    requirer_app = await deploy_dev_requirer(setup_juju["requirer_charm"], ops_test.model)
+    tls_secure_app: Application = tls_secure_deployment["app"]
+    tls_secure_machine: Machine = tls_secure_deployment["machine"]
+    requirer_app = await deploy_dev_requirer(build_charms["requirer_charm"], ops_test.model)
 
     assert requirer_app.status == "active"
     assert tls_secure_app.status == "active"
@@ -197,19 +188,33 @@ async def deploy_dev_requirer_and_tls_secure(ops_test: OpsTest, setup_juju: dict
     yield {
         "requirer_app": requirer_app,
         "tls_secure_app": tls_secure_app,
-        "machine0_id": setup_juju["machine_id"],
-        "machine0_hostname": setup_juju["machine_hostname"]
+        "tls_secure_machine": tls_secure_machine ,
     }
 
-    requirer_app.entity_id
     await ops_test.model.remove_application(requirer_app.entity_id, block_until_done=True)
     await ops_test.model.remove_application(tls_secure_app.entity_id, block_until_done=True)
 
+@pytest_asyncio.fixture(scope="function")
+async def deploy_haproxy(ops_test: OpsTest) -> Application:
+    haproxy_config = {"services": "", "source": "ppa:vbernat/haproxy-2.4"}
+    haproxy_app: Application = await ops_test.model.deploy(
+        "haproxy", config=haproxy_config, num_units=1, series="jammy"
+    )
+
+    await ops_test.model.wait_for_idle()
+
+    assert haproxy_app.status == "active"
+
+    yield haproxy_app
+
+    await ops_test.model.remove_application(haproxy_app.entity_id, block_until_done=True)
 
 @pytest.mark.skip
 @pytest.mark.abort_on_fail
 @pytest.mark.asyncio
-async def test_relation_and_certificate_generation(ops_test: OpsTest, deploy_dev_requirer_and_tls_secure: dict):
+async def test_signed_certificate_relation_and_certificate_generation(
+    ops_test: OpsTest, deploy_dev_requirer_and_tls_secure: dict
+):
     """Build the charm-under-test and deploy it together with related charms.
 
     Assert on the unit status before any relations/configurations take place.
@@ -217,6 +222,7 @@ async def test_relation_and_certificate_generation(ops_test: OpsTest, deploy_dev
     requirer_app: Application = deploy_dev_requirer_and_tls_secure["requirer_app"]
 
     app: Application = deploy_dev_requirer_and_tls_secure["tls_secure_app"]
+    tls_secure_machine: Machine = deploy_dev_requirer_and_tls_secure["tls_secure_machine"]
 
     # Relate the two applications
     # The requirer app will ask for a certificate
@@ -227,7 +233,7 @@ async def test_relation_and_certificate_generation(ops_test: OpsTest, deploy_dev
 
     # Test running the certificate actions
     fqdn = (
-        setup_juju["machine_hostname"] + ".lxd"
+        tls_secure_machine.hostname + ".lxd"
     )  # Should be the address to the machine where acmesh-operator is running
     csr = create_csr(fqdn).decode().strip()
     u: Unit = app.units[0]
@@ -245,37 +251,59 @@ async def test_relation_and_certificate_generation(ops_test: OpsTest, deploy_dev
     assert app.status == "active"
     assert requirer_app.status == "active"
 
-@pytest.mark.abort_on_fail
-@pytest.mark.asyncio
-async def test_connection_with_haproxy(ops_test: OpsTest, deploy_dev_requirer_and_tls_secure: dict) -> Application:
-    """Test connection to Haproxy."""
-
-    requirer_app: Application = deploy_dev_requirer_and_tls_secure["requirer_app"]
-    tls_secure_app: Application = deploy_dev_requirer_and_tls_secure["tls_secure_app"]
-
-    haproxy_charm = await deploy_haproxy(ops_test.model)
-    await transfer_haproxy_fqdn_to_dev_requirer(ops_test.model)
-
-    assert haproxy_charm.status == "active"
-
-    await ops_test.model.add_relation(tls_secure_app.entity_id, haproxy_charm.entity_id)
-    await ops_test.model.wait_for_idle(apps=[tls_secure_app.entity_id, haproxy_charm.entity_id])
-
-    assert tls_secure_app.status == "active"
-    assert haproxy_charm.status == "active"
-
 @pytest.mark.skip
 @pytest.mark.abort_on_fail
 @pytest.mark.asyncio
-async def test_connection_with_haproxy(ops_test: OpsTest) -> Application:
+async def test_connection_with_haproxy(
+    ops_test: OpsTest, deploy_dev_requirer_and_tls_secure: dict, deploy_haproxy: Application
+) -> Application:
     """Test connection to Haproxy."""
+    requirer_app: Application = deploy_dev_requirer_and_tls_secure["requirer_app"]
+    tls_secure_app: Application = deploy_dev_requirer_and_tls_secure["tls_secure_app"]
+    haproxy_app = deploy_haproxy
 
-    haproxy_charm = await deploy_haproxy(ops_test.model)
+    await transfer_haproxy_fqdn_to_dev_requirer(ops_test.model)
 
-    assert haproxy_charm.status == "active"
+    # This will (by default) add an entry in the haproxy.cfg to proxy all acme requests to
+    # the tls_secure app.
+    await ops_test.model.add_relation(tls_secure_app.entity_id, haproxy_app.entity_id)
+    await ops_test.model.wait_for_idle(apps=[tls_secure_app.entity_id, haproxy_app.entity_id])
 
+    # The dev requirer will ask the tls-secure charm for a certificate for the domain of
+    # the machine where haproxy is running.
+    await ops_test.model.add_relation(tls_secure_app.entity_id, requirer_app.entity_id)
+    await ops_test.model.wait_for_idle(apps=[tls_secure_app.entity_id, requirer_app.entity_id])
 
+    assert tls_secure_app.status == "active"
+    assert haproxy_app.status == "active"
+    assert requirer_app.status == "active"
 
+@pytest.mark.abort_on_fail
+@pytest.mark.asyncio
+async def test_connection_with_haproxy_when_no_relation_from_start(
+    ops_test: OpsTest, deploy_dev_requirer_and_tls_secure: dict, deploy_haproxy: Application
+) -> Application:
+    """Test that if a proxy service is configured the charm waits for that relation
+    to be established before attempting to issue a certificate"""
+    requirer_app: Application = deploy_dev_requirer_and_tls_secure["requirer_app"]
+    tls_secure_app: Application = deploy_dev_requirer_and_tls_secure["tls_secure_app"]
+    haproxy_app = deploy_haproxy
+    await transfer_haproxy_fqdn_to_dev_requirer(ops_test.model)
+
+    # By default the haproxy service is configured so adding this relation would mean that
+    # the certificate creation event should be defered and the charm should be in a waiting
+    # status.
+    await ops_test.model.add_relation(tls_secure_app.entity_id, requirer_app.entity_id)
+    await ops_test.model.wait_for_idle(apps=[tls_secure_app.entity_id, requirer_app.entity_id])
+    # assert tls_secure_app.status == "waiting"
+    async with ops_test.fast_forward(fast_interval="30s"):
+        # When the relation is established the certificate should be issued
+        await ops_test.model.add_relation(tls_secure_app.entity_id, haproxy_app.entity_id)
+        await ops_test.model.wait_for_idle(apps=[tls_secure_app.entity_id, haproxy_app.entity_id])
+    #TODO: Verify that certificates have been created
+    assert tls_secure_app.status == "active"
+    assert haproxy_app.status == "active"
+    assert requirer_app.status == "active"
 
 
 @pytest_asyncio.fixture(scope="module")
@@ -283,7 +311,6 @@ async def test_fixture() -> str:
     logger.info(f"Fixture time: {datetime.datetime.now()}")
     await asyncio.sleep(5)
     return "hello"
-
 
 @pytest.mark.skip
 @pytest.mark.asyncio

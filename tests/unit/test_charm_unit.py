@@ -198,6 +198,15 @@ class TestCharm(unittest.TestCase):
         domain = self.harness.charm._domain_from_csr(csr.decode())
         self.assertEqual(domain, sans_domain)
 
+    def test_validate_proxy_service(self) -> None:
+        """Test the validation of the proxy service."""
+        service = "nginx"
+        self.assertRaises(ValueError, self.harness.charm._validate_proxy_service, service)
+        service = "None"
+        self.assertEqual(self.harness.charm._validate_proxy_service(service), "none")
+        self.harness.update_config({"proxy-service": "none"})
+        self.assertEqual(None, self.harness.charm.proxy_service)
+
     def test_invalid_haproxy_config(self) -> None:
         """Test that the haproxy config cannot be empty."""
         with self.assertRaises(ValueError) as cm:
@@ -220,6 +229,22 @@ class TestCharm(unittest.TestCase):
             self.harness.add_relation_unit(self.haproxy_relation_id, self.haproxy_remote_unit_name)
             should_update = self.harness.charm._should_update_haproxy_relation_data()
             self.assertFalse(should_update)
+
+    def test_should_wait_for_haproxy_service(self) -> None:
+        """Test when the charm should wait for the proxy relation to be established."""
+        # No proxy service configured --> should not wait
+        self.harness.update_config({"proxy-service": "none"})
+        self.assertEqual(self.harness.charm._should_wait_for_proxy_relation(), False)
+
+        # Proxy service configured but no proxy relation --> should wait
+        self.harness.remove_relation(self.haproxy_relation_id)
+        self.harness.update_config({"proxy-service": "haproxy"})
+        self.assertEqual(self.harness.charm._should_wait_for_proxy_relation(), True)
+        self.assertIsInstance(self.harness.charm.unit.status, ops.WaitingStatus)
+
+        # Proxy service configured and proxy relation --> should not wait
+        self.harness.add_relation(self.haproxy_relation_name, self.haproxy_remote_app)
+        self.assertEqual(self.harness.charm._should_wait_for_proxy_relation(), False)
 
     def test_haproxy_relation_joined(self) -> None:
         """Test the haproxy relation joined."""

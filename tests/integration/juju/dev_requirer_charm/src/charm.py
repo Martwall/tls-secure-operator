@@ -80,7 +80,7 @@ class DevRequirer(CharmBase):
             logger.info(f"THe fqdn is: {socket.getfqdn()}")
             logger.info(f"the domain is {domain}")
             logger.info(f"The container ip is: {container_ip}")
-            
+
             csr = generate_csr(
                 private_key=private_key,
                 subject=domain,
