@@ -41,7 +41,7 @@ requires:
       limit: 1
 ```
 
-Use the charms.tls_certificates_interface.v2.tls_certificates lib to handle the integration in your charm. Checkout the [settings](#settings) and [certificate signing request sections](#certificate-signing-request). Also look at the examples of a requirer charm from the [documentation of the TLS Certificates Interface lib](https://charmhub.io/tls-certificates-interface/libraries/tls_certificates). There is also a [requirer charm](tests/integration/juju/dev_requirer_charm/src/charm.py) used for integration testing to take a look at if inspiration is required but it is purely for development.
+Use the charms.tls_certificates_interface.v2.tls_certificates lib to handle the integration in your charm. Checkout the [settings](#settings) and [certificate signing request](#certificate-signing-request) sections. Also look at the examples of a requirer charm from the [documentation of the TLS Certificates Interface lib](https://charmhub.io/tls-certificates-interface/libraries/tls_certificates). There is also a [requirer charm](tests/integration/juju/dev_requirer_charm/src/charm.py) used for integration testing to take a look at if inspiration is required but it is purely for development.
 
 On juju command line when using Haproxy as the proxy service:
 

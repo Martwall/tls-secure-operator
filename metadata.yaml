@@ -20,14 +20,15 @@ description: |
 
   This is for charms needing signed TLS certificates for their web services.
 
-  Uses acme.sh under the hood.
+  Uses acme.sh under the hood for certificate handling.
 
 maintainers:
   - Martwall
 
-source: https://github.com/Martwall/acmesh-operator
-issues: https://github.com/Martwall/acmesh-operator/issues
+source: https://github.com/Martwall/tls-secure-operator
+issues: https://github.com/Martwall/tls-secure-operator/issues
 website:
+  - https://github.com/Martwall/tls-secure-operator
   - https://github.com/acmesh-official/acme.sh
 
 # Subordinate units inherit the public/private address of the principal application. The container of the principal defines the network setup.
