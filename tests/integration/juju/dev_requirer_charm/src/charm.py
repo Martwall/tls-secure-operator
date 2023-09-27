@@ -15,7 +15,7 @@ from charms.tls_certificates_interface.v2.tls_certificates import (
     generate_private_key,
 )
 from cryptography import x509
-from ops import ActiveStatus, BlockedStatus, InstallEvent, MaintenanceStatus
+from ops import ActiveStatus, BlockedStatus, ConfigChangedEvent, InstallEvent, MaintenanceStatus
 from ops.charm import CharmBase, RelationJoinedEvent
 from ops.main import main
 from ops.model import ModelError
@@ -33,6 +33,7 @@ class DevRequirer(CharmBase):
         self.signed_certificates = TLSCertificatesRequiresV2(
             self, INTERFACE_NAME, expiry_notification_time=1
         )
+        self.framework.observe(self.on.config_changed, self._on_config_changed)
         self.framework.observe(
             self.signed_certificates.on.certificate_available, self._on_certificate_available
         )
@@ -58,6 +59,12 @@ class DevRequirer(CharmBase):
         self.unit.status = ActiveStatus()
         return
 
+    def _on_config_changed(self, event: ConfigChangedEvent) -> None:
+        """Config changed handler."""
+        self.unit.status = MaintenanceStatus("Changing config...")
+        logger.info(f"New config: {self.model.config}")
+        self.unit.status = ActiveStatus("...config changed.")
+
     def _generate_new_csr(self) -> bytes:
         container_ip = None
         try:
@@ -70,9 +77,12 @@ class DevRequirer(CharmBase):
             domain = hostname + ".lxd"
             # This is to simulate when a dns is used for the proxy container and not the container.
             # Like pointing a subdomain to the IP address of the host where haproxy is running.
-            if os.path.exists("/root/haproxy_juju_fqdn"):
-                with open("/root/haproxy_juju_fqdn", "r") as fqdn_file:
-                    domain = fqdn_file.read()
+            if self.model.config["domain"]:
+                domain = self.model.config["domain"]
+            else:
+                if os.path.exists("/root/haproxy_juju_fqdn"):
+                    with open("/root/haproxy_juju_fqdn", "r") as fqdn_file:
+                        domain = fqdn_file.read()
 
             sans_dns = [domain]
             container_ip = str(self.model.get_binding(INTERFACE_NAME).network.ingress_address)

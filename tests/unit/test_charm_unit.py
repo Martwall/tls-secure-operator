@@ -4,6 +4,7 @@
 # Learn more about testing at: https://juju.is/docs/sdk/testing
 import logging
 import socket
+import subprocess
 import unittest
 from os import mkdir
 from os.path import abspath, exists, join
@@ -12,7 +13,7 @@ from unittest.mock import PropertyMock, patch
 
 import ops
 import ops.testing
-from charm import KNOWN_CAS, AcmeshOperatorCharm
+from charm import KNOWN_CAS, TlsSecureOperatorCharm
 from charms.tls_certificates_interface.v2.tls_certificates import (
     generate_csr,
     generate_private_key,
@@ -21,7 +22,7 @@ from charms.tls_certificates_interface.v2.tls_certificates import (
 logger = logging.getLogger(__name__)
 
 
-LXC_TEST_INSTANCE_NAME = "test-acmesh-operator-UStJX1kdja3n0qoRlKWzog"
+LXC_TEST_INSTANCE_NAME = "test-tls-secure-operator-UStJX1kdja3n0qoRlKWzog"
 TEMPORARY_DIR_TEST_PATH = "./tests/unit/tmp-test"
 
 
@@ -33,11 +34,11 @@ class TestCharm(unittest.TestCase):
             mkdir(TEMPORARY_DIR_TEST_PATH)
 
     def setUp(self):
-        # self.patcher = patch.object(AcmeshOperatorCharm, "ingress_address", return_value="1.2.3.4")
-        # self.mock_ingress_address = MagicMock(spec=AcmeshOperatorCharm, ingress_address="1.2.3.4")
-        self.harness = ops.testing.Harness(AcmeshOperatorCharm)
-        self.harness.set_model_name("testing-acmesh-operator")
-        self.harness.model.unit.name = "acmesh/0"
+        # self.patcher = patch.object(TlsSecureOperatorCharm, "ingress_address", return_value="1.2.3.4")
+        # self.mock_ingress_address = MagicMock(spec=TlsSecureOperatorCharm, ingress_address="1.2.3.4")
+        self.harness = ops.testing.Harness(TlsSecureOperatorCharm)
+        self.harness.set_model_name("testing-tls-secure-operator")
+        self.harness.model.unit.name = "tls-secure/0"
         self.relation_name = "signed-certificates"
         self.remote_app = "signed-certs-requirer"
         self.remote_unit_name = "signed-certs-requirer/0"
@@ -121,7 +122,7 @@ class TestCharm(unittest.TestCase):
         self.harness.update_config(
             {
                 "use-email": True,
-                "email": "some_email+acmesh@example.com",
+                "email": "some_email+tls-secure@example.com",
                 "server": "https://dv.acme-v02.api.pki.goog/directory",
                 "eab-kid": "some-eab-kid",
                 "eab-hmac-key": "some-hmac-key",
@@ -216,7 +217,7 @@ class TestCharm(unittest.TestCase):
     def test_should_update_haproxy_config(self) -> None:
         """Test when the haproxy config should be updated."""
         mock_ingress_address = PropertyMock(return_value="1.2.3.4")
-        with patch.object(AcmeshOperatorCharm, "ingress_address", mock_ingress_address):
+        with patch.object(TlsSecureOperatorCharm, "ingress_address", mock_ingress_address):
             # no relation joined so this should be false
             should_update = self.harness.charm._should_update_haproxy_relation_data()
             self.assertFalse(should_update)
@@ -230,21 +231,46 @@ class TestCharm(unittest.TestCase):
             should_update = self.harness.charm._should_update_haproxy_relation_data()
             self.assertFalse(should_update)
 
-    def test_should_wait_for_haproxy_service(self) -> None:
+    @patch("charm.TlsSecureOperatorCharm._is_proxy_service_up")
+    def test_should_wait_for_haproxy_service(self, mock_is_proxy_service_up) -> None:
         """Test when the charm should wait for the proxy relation to be established."""
+        testing_proxy_domain = "some-domain"
         # No proxy service configured --> should not wait
         self.harness.update_config({"proxy-service": "none"})
-        self.assertEqual(self.harness.charm._should_wait_for_proxy_relation(), False)
+        self.assertEqual(
+            self.harness.charm._should_wait_for_proxy_relation(testing_proxy_domain), False
+        )
 
         # Proxy service configured but no proxy relation --> should wait
         self.harness.remove_relation(self.haproxy_relation_id)
         self.harness.update_config({"proxy-service": "haproxy"})
-        self.assertEqual(self.harness.charm._should_wait_for_proxy_relation(), True)
+        self.assertEqual(
+            self.harness.charm._should_wait_for_proxy_relation(testing_proxy_domain), True
+        )
         self.assertIsInstance(self.harness.charm.unit.status, ops.WaitingStatus)
 
-        # Proxy service configured and proxy relation --> should not wait
+        # Proxy service configured and proxy relation, can reach proxy service --> should not wait
         self.harness.add_relation(self.haproxy_relation_name, self.haproxy_remote_app)
-        self.assertEqual(self.harness.charm._should_wait_for_proxy_relation(), False)
+        mock_is_proxy_service_up.return_value = True
+        self.assertEqual(
+            self.harness.charm._should_wait_for_proxy_relation(testing_proxy_domain), False
+        )
+
+        # Proxy service configured and proxy relation, can not reach proxy service --> should wait
+        mock_is_proxy_service_up.return_value = False
+        self.assertEqual(
+            self.harness.charm._should_wait_for_proxy_relation(testing_proxy_domain), True
+        )
+
+    @patch("charm.check_call")
+    def test_is_proxy_service_up(self, mock_check_call) -> None:
+        """Test the check if the proxy service is up."""
+        mock_check_call.side_effect = None
+        is_up = self.harness.charm._is_proxy_service_up("example_url")
+        self.assertTrue(is_up)
+        mock_check_call.side_effect = subprocess.CalledProcessError(7, "some command")
+        is_up = self.harness.charm._is_proxy_service_up("example_url")
+        self.assertFalse(is_up)
 
     def test_haproxy_relation_joined(self) -> None:
         """Test the haproxy relation joined."""

@@ -11,7 +11,7 @@ from subprocess import CalledProcessError, check_call
 
 import ops
 import ops.testing
-from charm import AcmeshOperatorCharm
+from charm import TlsSecureOperatorCharm
 from ops.model import ActiveStatus
 
 logger = logging.getLogger(__name__)
@@ -79,7 +79,7 @@ class TestCharm(unittest.TestCase):
         cls.addClassCleanup(cls.cleanup_tmp_dir)
 
     def setUp(self):
-        self.harness = ops.testing.Harness(AcmeshOperatorCharm)
+        self.harness = ops.testing.Harness(TlsSecureOperatorCharm)
         self.harness.set_model_name("testing-acmesh-operator")
         self.relation_name = "signed-certificates"
         self.remote_app = "signed-certs-requirer"

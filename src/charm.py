@@ -16,7 +16,6 @@ from urllib.parse import urlparse
 
 import pem
 import yaml
-import token
 from charms.tls_certificates_interface.v2.tls_certificates import (
     CertificateCreationRequestEvent,
     CertificateRevocationRequestEvent,
@@ -51,7 +50,7 @@ class NewCertificateResponse(TypedDict):
     fullchain: list[str]
 
 
-class AcmeshOperatorCharm(CharmBase):
+class TlsSecureOperatorCharm(CharmBase):
     """Charm the service."""
 
     TEMPORARY_DIR_PATH = "/tmp"
@@ -530,10 +529,17 @@ class AcmeshOperatorCharm(CharmBase):
                     remove(path_to_remove)
 
     def _should_wait_for_proxy_relation(self, proxy_domain: str) -> bool:
-        """Check if the charm should wait for the proxy relation to be established before 
-        attempting to issue the certificate.
-        
-            OBS! The provider relation name must be the same as the proxy service name.
+        """Check if the charm should wait for the proxy relation to be established before attempting to issue the certificate.
+
+        OBS! The provider relation name in the metadata.yaml must be the same as the proxy service
+        defined as the config value under the config option `proxy-service`.
+
+        Args:
+            proxy_domain (str):
+                This is the domain on which the proxy service can be reached.
+
+        Returns:
+            bool: If the charm should wait on the proxy relation or not.
         """
         if self.proxy_service:
             # Make sure that there is a relation matching that service
@@ -567,7 +573,7 @@ class AcmeshOperatorCharm(CharmBase):
             csr = event.certificate_signing_request
             domain = self._domain_from_csr(csr)
             if self._should_wait_for_proxy_relation(proxy_domain=domain):
-                logger.info("Defering certificate creation because waiting for proxy relation.")
+                logger.info("Deferring certificate creation because waiting for proxy relation.")
                 event.defer()
                 return
             if self._should_register_account(email=self.email, server=self.server):
@@ -726,10 +732,9 @@ class AcmeshOperatorCharm(CharmBase):
     def _is_proxy_service_up(self, url: str) -> bool:
         """Check if the proxy service is up. Meaning that it is responding to requests."""
         try:
-            self.model.relations
             check_call(["curl", "-I", url])
             return True
-        except CalledProcessError as e:
+        except CalledProcessError:
             logger.info("Proxy service not yet up")
             return False
 
@@ -881,4 +886,4 @@ class AcmeshOperatorCharm(CharmBase):
 
 
 if __name__ == "__main__":
-    main(AcmeshOperatorCharm)
+    main(TlsSecureOperatorCharm)

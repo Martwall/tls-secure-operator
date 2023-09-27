@@ -3,24 +3,24 @@
 
 # The charm package name, no spaces (required)
 # See https://juju.is/docs/sdk/naming#heading--naming-charms for guidance.
-name: acmesh
+name: tls-secure
  
 # The following metadata are human-readable and will be published prominently on Charmhub.
 
 # (Recommended)
-display-name: acme.sh
+display-name: TLS Secure
 
 # (Required)
-summary: acme.sh - An ACME protocol client as a subordinate charm
+summary: Secure services with signed tls certificates
 
 description: |
-  An ACME protocol client.
-
-  Full ACME protocol implementation.
-
   Provides TLS certificates through a stand alone webserver and the tls-certificates interface.
 
-  Charms needing signed TLS certificates.
+  Can be used either in a relationship with a proxy (currently only Haproxy) or by itself.
+
+  This is for charms needing signed TLS certificates for their web services.
+
+  Uses acme.sh under the hood.
 
 maintainers:
   - Martwall

@@ -4,14 +4,15 @@
 
 import asyncio
 import datetime
+import json
 import logging
 import os
 from pathlib import Path
+from subprocess import check_output
 
 import pytest
 import pytest_asyncio
 import yaml
-import ops
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
@@ -27,7 +28,7 @@ from pytest_operator.plugin import OpsTest
 logger = logging.getLogger(__name__)
 
 METADATA = yaml.safe_load(Path("./metadata.yaml").read_text())
-ACMESH_APP_NAME = METADATA["name"]
+TLS_SECURE_APP_NAME = METADATA["name"]
 REQUIRER_METADATA = yaml.safe_load(
     Path("./tests/integration/juju/dev_requirer_charm/metadata.yaml").read_text()
 )
@@ -84,10 +85,10 @@ def create_csr(common_name: str):
 @pytest_asyncio.fixture(scope="module")
 async def build_charms(ops_test: OpsTest):
     requirer_charm = await build_the_dev_requirer(ops_test)
-    acmesh_charm = await ops_test.build_charm(".")
+    tls_secure_charm = await ops_test.build_charm(".")
 
     return {
-        "acmesh_charm": acmesh_charm,
+        "tls_secure_charm": tls_secure_charm,
         "requirer_charm": requirer_charm,
     }
 
@@ -115,9 +116,9 @@ async def deploy_dev_requirer(charm: Path, model: Model) -> Application:
     assert requirer_app.status == "active"
     return requirer_app
 
+
 async def add_machine_for_tls_secure(model: Model) -> Machine:
-    """This is needed for the acme.sh curl invocation to trust the self-signed certificates
-    of the pebble dev server"""
+    """Needed for the acme.sh curl invocation to trust the self-signed certificates of the pebble dev server."""
     # Add a machine before so that certificates can be transferred to it
     machine: Machine = await model.add_machine()
     await model.block_until(lambda: machine.hostname is not None, timeout=160)
@@ -127,6 +128,7 @@ async def add_machine_for_tls_secure(model: Model) -> Machine:
 
     return machine
 
+
 async def deploy_tls_secure(model: Model, charm_path: Path) -> dict:
     """Deploy the tls secure application."""
     machine = await add_machine_for_tls_secure(model)
@@ -134,14 +136,11 @@ async def deploy_tls_secure(model: Model, charm_path: Path) -> dict:
     app: Application = await model.deploy(
         charm_path,
         num_units=1,
-        application_name=ACMESH_APP_NAME,
+        application_name=TLS_SECURE_APP_NAME,
         config=_config,
         to=machine.entity_id,
     )
-    return {
-        "app": app,
-        "machine": machine
-        }
+    return {"app": app, "machine": machine}
 
 
 async def transfer_haproxy_fqdn_to_dev_requirer(model: Model) -> None:
@@ -176,7 +175,7 @@ async def deploy_dev_requirer_and_tls_secure(ops_test: OpsTest, build_charms: di
     And cleaning up after every test function.
     """
     tls_secure_deployment = await deploy_tls_secure(
-        ops_test.model, build_charms["acmesh_charm"]
+        ops_test.model, build_charms["tls_secure_charm"]
     )
     tls_secure_app: Application = tls_secure_deployment["app"]
     tls_secure_machine: Machine = tls_secure_deployment["machine"]
@@ -188,11 +187,12 @@ async def deploy_dev_requirer_and_tls_secure(ops_test: OpsTest, build_charms: di
     yield {
         "requirer_app": requirer_app,
         "tls_secure_app": tls_secure_app,
-        "tls_secure_machine": tls_secure_machine ,
+        "tls_secure_machine": tls_secure_machine,
     }
 
     await ops_test.model.remove_application(requirer_app.entity_id, block_until_done=True)
     await ops_test.model.remove_application(tls_secure_app.entity_id, block_until_done=True)
+
 
 @pytest_asyncio.fixture(scope="function")
 async def deploy_haproxy(ops_test: OpsTest) -> Application:
@@ -209,34 +209,39 @@ async def deploy_haproxy(ops_test: OpsTest) -> Application:
 
     await ops_test.model.remove_application(haproxy_app.entity_id, block_until_done=True)
 
-@pytest.mark.skip
+
 @pytest.mark.abort_on_fail
 @pytest.mark.asyncio
 async def test_signed_certificate_relation_and_certificate_generation(
     ops_test: OpsTest, deploy_dev_requirer_and_tls_secure: dict
 ):
-    """Build the charm-under-test and deploy it together with related charms.
+    """Test that certificates are generated if the tls_secure app is used without a proxy.
 
-    Assert on the unit status before any relations/configurations take place.
+    The test assumes the operator has created a way for the acme server to reach the
+    standalone server setup by the acme workload in the charm.
     """
     requirer_app: Application = deploy_dev_requirer_and_tls_secure["requirer_app"]
 
-    app: Application = deploy_dev_requirer_and_tls_secure["tls_secure_app"]
+    tls_secure_app: Application = deploy_dev_requirer_and_tls_secure["tls_secure_app"]
     tls_secure_machine: Machine = deploy_dev_requirer_and_tls_secure["tls_secure_machine"]
+
+    # Do not use proxy for this test:
+    await tls_secure_app.set_config({"proxy-service": "none"})
+    fqdn = tls_secure_machine.hostname + ".lxd"
+    # This will be used in the dev requirers csr as the domain
+    # This would otherwise need to be handled by the operator
+    await requirer_app.set_config({"domain": fqdn})
 
     # Relate the two applications
     # The requirer app will ask for a certificate
-    await ops_test.model.add_relation(app.entity_id, requirer_app.entity_id)
-    await ops_test.model.wait_for_idle(apps=[ACMESH_APP_NAME, REQUIRER_APP_NAME])
+    await ops_test.model.add_relation(tls_secure_app.entity_id, requirer_app.entity_id)
+    await ops_test.model.wait_for_idle(apps=[TLS_SECURE_APP_NAME, REQUIRER_APP_NAME])
 
-    # TODO: Checkout the relation data
+    verify_certificates_created(tls_secure_app.units[0], requirer_app.units[0])
 
     # Test running the certificate actions
-    fqdn = (
-        tls_secure_machine.hostname + ".lxd"
-    )  # Should be the address to the machine where acmesh-operator is running
     csr = create_csr(fqdn).decode().strip()
-    u: Unit = app.units[0]
+    u: Unit = tls_secure_app.units[0]
     for action_name in ["create-certificate", "renew-certificate"]:
         action: Action = await u.run_action(action_name, csr=csr)
         await action.wait()
@@ -248,50 +253,26 @@ async def test_signed_certificate_relation_and_certificate_generation(
     assert "result" in action.results
     assert action.results["result"] != ""
 
-    assert app.status == "active"
-    assert requirer_app.status == "active"
-
-@pytest.mark.skip
-@pytest.mark.abort_on_fail
-@pytest.mark.asyncio
-async def test_connection_with_haproxy(
-    ops_test: OpsTest, deploy_dev_requirer_and_tls_secure: dict, deploy_haproxy: Application
-) -> Application:
-    """Test connection to Haproxy."""
-    requirer_app: Application = deploy_dev_requirer_and_tls_secure["requirer_app"]
-    tls_secure_app: Application = deploy_dev_requirer_and_tls_secure["tls_secure_app"]
-    haproxy_app = deploy_haproxy
-
-    await transfer_haproxy_fqdn_to_dev_requirer(ops_test.model)
-
-    # This will (by default) add an entry in the haproxy.cfg to proxy all acme requests to
-    # the tls_secure app.
-    await ops_test.model.add_relation(tls_secure_app.entity_id, haproxy_app.entity_id)
-    await ops_test.model.wait_for_idle(apps=[tls_secure_app.entity_id, haproxy_app.entity_id])
-
-    # The dev requirer will ask the tls-secure charm for a certificate for the domain of
-    # the machine where haproxy is running.
-    await ops_test.model.add_relation(tls_secure_app.entity_id, requirer_app.entity_id)
-    await ops_test.model.wait_for_idle(apps=[tls_secure_app.entity_id, requirer_app.entity_id])
-
     assert tls_secure_app.status == "active"
-    assert haproxy_app.status == "active"
     assert requirer_app.status == "active"
+
 
 @pytest.mark.abort_on_fail
 @pytest.mark.asyncio
 async def test_connection_with_haproxy_when_no_relation_from_start(
     ops_test: OpsTest, deploy_dev_requirer_and_tls_secure: dict, deploy_haproxy: Application
 ) -> Application:
-    """Test that if a proxy service is configured the charm waits for that relation
-    to be established before attempting to issue a certificate"""
+    """Test that if a proxy service is configured.
+
+    The charm waits for that relation to be established before attempting to issue a certificate.
+    """
     requirer_app: Application = deploy_dev_requirer_and_tls_secure["requirer_app"]
     tls_secure_app: Application = deploy_dev_requirer_and_tls_secure["tls_secure_app"]
     haproxy_app = deploy_haproxy
     await transfer_haproxy_fqdn_to_dev_requirer(ops_test.model)
 
     # By default the haproxy service is configured so adding this relation would mean that
-    # the certificate creation event should be defered and the charm should be in a waiting
+    # the certificate creation event should be deferred and the charm should be in a waiting
     # status.
     await ops_test.model.add_relation(tls_secure_app.entity_id, requirer_app.entity_id)
     await ops_test.model.wait_for_idle(apps=[tls_secure_app.entity_id, requirer_app.entity_id])
@@ -300,10 +281,28 @@ async def test_connection_with_haproxy_when_no_relation_from_start(
         # When the relation is established the certificate should be issued
         await ops_test.model.add_relation(tls_secure_app.entity_id, haproxy_app.entity_id)
         await ops_test.model.wait_for_idle(apps=[tls_secure_app.entity_id, haproxy_app.entity_id])
-    #TODO: Verify that certificates have been created
+
+    verify_certificates_created(tls_secure_app.units[0], requirer_app.units[0])
+
     assert tls_secure_app.status == "active"
     assert haproxy_app.status == "active"
     assert requirer_app.status == "active"
+
+
+def verify_certificates_created(tls_secure_unit: Unit, requirer_unit: Unit) -> None:
+    """Verify that certificates have been created when using the interface tls-certificates."""
+    tls_secure_relation_data = relation_inspect(
+        tls_secure_unit.entity_id, requirer_unit.entity_id, "signed-certificates"
+    )
+    csr = tls_secure_relation_data["related_unit_data"]["certificate_signing_requests"]
+    assert isinstance(csr, str)
+    assert len(csr) > 0
+    requirer_relation_data = relation_inspect(
+        requirer_unit.entity_id, tls_secure_unit.entity_id, "signed-certificates"
+    )
+    certificates = requirer_relation_data["application_data"]["certificates"]
+    assert isinstance(certificates, str)
+    assert len(certificates) > 0
 
 
 @pytest_asyncio.fixture(scope="module")
@@ -311,6 +310,7 @@ async def test_fixture() -> str:
     logger.info(f"Fixture time: {datetime.datetime.now()}")
     await asyncio.sleep(5)
     return "hello"
+
 
 @pytest.mark.skip
 @pytest.mark.asyncio
@@ -326,3 +326,23 @@ async def test_async_fixture_2(ops_test: OpsTest, test_fixture: str):
     """Some other test."""
     logger.info(f"test_async_fixture_2: {datetime.datetime.now()}")
     assert test_fixture == "hello"
+
+
+def relation_inspect(unit_name: str, related_unit_name: str, endpoint: str) -> dict:
+    """Get the relation data.
+
+    @return {application_data: dict, related_unit_data: dict}
+    """
+    application_data = {}
+    related_unit_data = {}
+    show_unit_data_json = check_output(
+        ["juju", "show-unit", unit_name, "--format", "json"], text=True
+    )
+    show_unit_data: dict = json.loads(show_unit_data_json)
+    relation_info = show_unit_data[unit_name]["relation-info"]
+    for relation in relation_info:
+        if relation["endpoint"] == endpoint:
+            application_data = relation["application-data"]
+            related_unit_data = relation["related-units"][related_unit_name]["data"]
+
+    return {"application_data": application_data, "related_unit_data": related_unit_data}
