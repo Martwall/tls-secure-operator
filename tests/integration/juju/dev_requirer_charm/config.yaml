@@ -1,0 +1,8 @@
+# Copyright Martwall 2023
+# See licensing file for more information
+
+options:
+  domain:
+    description: The domain to run the service on
+    default: ""
+    type: string

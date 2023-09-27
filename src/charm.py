@@ -15,15 +15,16 @@ from typing import TypedDict
 from urllib.parse import urlparse
 
 import pem
+import yaml
 from charms.tls_certificates_interface.v2.tls_certificates import (
     CertificateCreationRequestEvent,
     CertificateRevocationRequestEvent,
     TLSCertificatesProvidesV2,
 )
 from cryptography import x509
-from ops.charm import ActionEvent, CharmBase, ConfigChangedEvent, InstallEvent
+from ops.charm import ActionEvent, CharmBase, ConfigChangedEvent, InstallEvent, RelationJoinedEvent
 from ops.main import main
-from ops.model import ActiveStatus, BlockedStatus, MaintenanceStatus
+from ops.model import ActiveStatus, BlockedStatus, MaintenanceStatus, WaitingStatus
 
 # Log messages can be retrieved using juju debug-log
 logger = logging.getLogger(__name__)
@@ -49,12 +50,16 @@ class NewCertificateResponse(TypedDict):
     fullchain: list[str]
 
 
-class AcmeshOperatorCharm(CharmBase):
+class TlsSecureOperatorCharm(CharmBase):
     """Charm the service."""
 
     TEMPORARY_DIR_PATH = "/tmp"
     HTTPPORT = "80"  # Httpport for acme.sh standalone server
     _ACMESH_INSTALL_DIR = environ.get("JUJU_CHARM_DIR")
+    HAPROXY_RELATION_NAME = "haproxy"
+    HAPROXY_SERVICE_OPTIONS_CONFIG_NAME = "haproxy-service-options"
+    HAPROXY_SERVICE_OPTIONS_FILE_NAME = HAPROXY_SERVICE_OPTIONS_CONFIG_NAME.replace("-", "_")
+    ALLOWED_PROXY_SERVICES = ["haproxy", "none"]
 
     def __init__(self, *args):
         super().__init__(*args)
@@ -76,6 +81,7 @@ class AcmeshOperatorCharm(CharmBase):
         self.framework.observe(
             self.on.revoke_certificate_action, self._on_revoke_certificate_action
         )
+        self.framework.observe(self.on.haproxy_relation_joined, self._on_haproxy_relation_joined)
 
     def _on_install(self, event: InstallEvent) -> None:
         self.unit.status = MaintenanceStatus("Installing acme.sh")
@@ -129,26 +135,28 @@ class AcmeshOperatorCharm(CharmBase):
         # Fetch the new config value
         try:
             self._validate_use_email()
-            logger.debug("use-email updated")
             self._validate_email()
-            logger.debug("email updated")
             self._validate_server(server=self.model.config["server"].lower())
-            logger.debug("server updated")
             self._validate_eab_kid(
                 eab_kid=self.model.config["eab-kid"],
                 eab_hmac_key=self.model.config["eab-hmac-key"],
             )
-            logger.debug("eab-kid updated")
             self._validate_eab_hmac_key(
                 eab_hmac_key=self.model.config["eab-hmac-key"],
                 eab_kid=self.model.config["eab-kid"],
             )
-            logger.debug("eab-hmac-key updated")
             self._validate_debug(self.model.config["debug"])
-            logger.debug("debug updated")
             self._validate_debug_level(self.model.config["debug-level"])
-            logger.debug("debug-level updated")
-            self.unit.status = ActiveStatus()
+            self._validate_proxy_service(self.model.config["proxy-service"])
+            self._validate_haproxy_service_options(
+                self.model.config[self.HAPROXY_SERVICE_OPTIONS_CONFIG_NAME]
+            )
+            if self._should_update_haproxy_relation_data():
+                did_update = self._update_haproxy_relation_data()
+                if not did_update:
+                    self.unit.status = BlockedStatus("Could not update haproxy relation data")
+                    return
+            self.unit.status = ActiveStatus("Config updated.")
         except ValueError as error:
             logger.error(error)
             self.unit.status = BlockedStatus(str(error))
@@ -227,6 +235,21 @@ class AcmeshOperatorCharm(CharmBase):
         if debug_level not in valid_levels:
             raise ValueError(f"Valid debug levels are: {valid_levels}")
         return debug_level
+
+    def _validate_proxy_service(self, proxy_service: str) -> str:
+        """Validate the selected proxy service."""
+        service = proxy_service.lower().strip()
+        if service not in self.ALLOWED_PROXY_SERVICES:
+            raise ValueError(f"Valid proxy services are: {self.ALLOWED_PROXY_SERVICES}")
+        return service
+
+    def _validate_haproxy_service_options(self, ha_service_options: str) -> str:
+        """Validate the Haproxy service options."""
+        if self.proxy_service == "haproxy" and not ha_service_options:
+            raise ValueError(
+                "Haproxy service options cannot be empty when using Haproxy as proxy service."
+            )
+        return ha_service_options
 
     def _register_account(self, email: str, server: str) -> None:
         """Register account with the specified server.
@@ -505,14 +528,56 @@ class AcmeshOperatorCharm(CharmBase):
                 if exists(path_to_remove):
                     remove(path_to_remove)
 
+    def _should_wait_for_proxy_relation(self, proxy_domain: str) -> bool:
+        """Check if the charm should wait for the proxy relation to be established before attempting to issue the certificate.
+
+        OBS! The provider relation name in the metadata.yaml must be the same as the proxy service
+        defined as the config value under the config option `proxy-service`.
+
+        Args:
+            proxy_domain (str):
+                This is the domain on which the proxy service can be reached.
+
+        Returns:
+            bool: If the charm should wait on the proxy relation or not.
+        """
+        if self.proxy_service:
+            # Make sure that there is a relation matching that service
+            relation = self.model.get_relation(self.proxy_service)
+            if not relation:
+                self.model.unit.status = WaitingStatus(
+                    f"Waiting for {self.proxy_service} relation"
+                )
+                return True
+            else:
+                if self.proxy_service == "haproxy":
+                    random_part = token_urlsafe(8)
+                    url = f"http://{proxy_domain}:{self.HTTPPORT}/check_from_juju/{random_part}"
+                    if self._is_proxy_service_up(url):
+                        return False
+                    else:
+                        self.model.unit.status = WaitingStatus(
+                            f"Waiting for {self.proxy_service} service to start..."
+                        )
+                        return True
+                else:
+                    raise RuntimeError(f"No check configure for proxy: {self.proxy_service}")
+        else:
+            return False
+
     def _on_signed_certificate_creation_request(
         self, event: CertificateCreationRequestEvent
     ) -> None:
         """Attempt to create a signed certificate for the requirer charm."""
         try:
+            csr = event.certificate_signing_request
+            domain = self._domain_from_csr(csr)
+            if self._should_wait_for_proxy_relation(proxy_domain=domain):
+                logger.info("Deferring certificate creation because waiting for proxy relation.")
+                event.defer()
+                return
             if self._should_register_account(email=self.email, server=self.server):
                 self._register_account(email=self.email, server=self.server)
-            csr = event.certificate_signing_request
             new_certificate_response = self._issue_certificate_from_csr(csr=csr)
             self.signed_certificates.set_relation_certificate(
                 certificate=new_certificate_response["certificate"],
@@ -606,6 +671,73 @@ class AcmeshOperatorCharm(CharmBase):
             logger.error(e)
             event.fail(f"Could not renew certificate for domain: {domain} Error: {e}")
 
+    def _on_haproxy_relation_joined(self, event: RelationJoinedEvent) -> None:
+        """Update the reverse proxy relation data when joining the relation."""
+        self._update_haproxy_relation_data()
+
+    def _should_update_haproxy_relation_data(self) -> bool:
+        """Check if the haproxy configuration has changed and needs updating.
+
+        The config is stored on file in order to check if there is a change of the current
+        config compared to the previous config. This is to avoid unnecessary restarts of
+        the Haproxy service because of relation data updates.
+        """
+        if not self.model.get_relation(self.HAPROXY_RELATION_NAME):
+            return False
+        if exists(self.haproxy_service_options_file_path):
+            with open(self.haproxy_service_options_file_path, "r") as opt_file:
+                options = opt_file.read()
+                if options == self.model.config[self.HAPROXY_SERVICE_OPTIONS_CONFIG_NAME]:
+                    return False
+                else:
+                    return True
+        else:
+            return False
+
+    def _update_haproxy_relation_data(self) -> bool:
+        """Reverseproxy relation data update."""
+        relation = self.model.get_relation(self.HAPROXY_RELATION_NAME)
+        if not relation:
+            logger.error("No relation when updating haproxy relation data")
+            self.unit.status = WaitingStatus("Waiting for integration with Haproxy.")
+            return False
+        acme_server_address = self.ingress_address
+        acme_server_port = self.HTTPPORT
+        if not acme_server_address:
+            logger.error("No ingress address for this server.")
+            self.unit.status = WaitingStatus("Waiting for ingress address.")
+            return False
+        unit_id = self.model.unit.name.replace("/", "-")
+        # TODO: This only allows for one server. How to send requests to the correct backend server?
+
+        haproxy_services = [
+            {
+                "service_name": "acme-challenge",
+                "service_host": "0.0.0.0",
+                "service_port": "80",
+                "service_options": self.haproxy_service_options,
+                "servers": [[unit_id, acme_server_address, int(acme_server_port), None]],
+            }
+        ]
+        relation.data[self.unit].update(
+            {
+                "host": acme_server_address,
+                "port": acme_server_port,
+                "services": yaml.dump(haproxy_services),
+            }
+        )
+        self.unit.status = ActiveStatus("Haproxy relation data updated.")
+        return True
+
+    def _is_proxy_service_up(self, url: str) -> bool:
+        """Check if the proxy service is up. Meaning that it is responding to requests."""
+        try:
+            check_call(["curl", "-I", url])
+            return True
+        except CalledProcessError:
+            logger.info("Proxy service not yet up")
+            return False
+
     @property
     def acmesh_install_dir(self) -> str:
         """Absolute path to acme.sh install/git clone dir."""
@@ -692,7 +824,7 @@ class AcmeshOperatorCharm(CharmBase):
 
     @property
     def ingress_address(self) -> str | None:
-        """The address other service should use to connect to this unit."""
+        """The address other services should use to connect to this unit."""
         binding = self.model.get_binding("juju-info")
         if not binding:
             return None
@@ -700,6 +832,41 @@ class AcmeshOperatorCharm(CharmBase):
         if not ingress_address:
             return None
         return str(ingress_address)
+
+    @property
+    def haproxy_service_options_file_path(self) -> str:
+        """The haproxy service options absolute file path."""
+        file_name = self.HAPROXY_SERVICE_OPTIONS_FILE_NAME
+        if environ.get("JUJU_CHARM_DIR"):
+            return path.join(environ.get("JUJU_CHARM_DIR"), file_name)
+        else:
+            return path.join("/root", file_name)
+
+    @property
+    def proxy_service(self) -> str | None:
+        """The proxy service."""
+        service = self.model.config["proxy-service"].lower().strip()
+        if service == "none":
+            return None
+        return service
+
+    @property
+    def haproxy_service_options(self) -> list[str]:
+        """The haproxy service options.
+
+        Also stores the last value of the service_options string to be able
+        to check if the haproxy config should be updated when the configuration is updated.
+        """
+        service_options_str = self.model.config[self.HAPROXY_SERVICE_OPTIONS_CONFIG_NAME]
+        service_options_list = service_options_str.split(",")
+        service_options_ret = []
+        for opt in service_options_list:
+            stripped_opt = opt.strip()
+            service_options_ret.append(stripped_opt)
+
+        with open(self.haproxy_service_options_file_path, "w") as opt_file:
+            opt_file.write(service_options_str)
+        return service_options_ret
 
     def flatten_list(self, list_to_flatten) -> list[str]:
         """Flatten a list with nested list."""
@@ -719,4 +886,4 @@ class AcmeshOperatorCharm(CharmBase):
 
 
 if __name__ == "__main__":
-    main(AcmeshOperatorCharm)
+    main(TlsSecureOperatorCharm)
