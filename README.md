@@ -14,7 +14,7 @@ Charmhub package name: tls-secure
 
 More information: https://charmhub.io/tls-secure
 
-A charm to get signed certificates to protect (web) services. It attempts to integrate with reverseproxies in order to complete the http-01 challenge.
+A charm to get signed certificates to protect (web) services. It attempts to integrate with reverse proxies in order to complete the http-01 challenge.
 Uses the "tls-certificates" interface and relation name "signed-certificates".
 Uses (currently) acme.sh under the hood for fetching and handling certificates.
 
@@ -60,7 +60,7 @@ juju integrate tls-secure:signed-certificates your-charm:signed-certificates
 ```
 
 Please note that somehow the ACME server needs to be able to reach the standalone server in
-the charm.
+the charm. See [Allow incoming requests to the standalone server](#allow-incoming-requests-to-the-standalone-server).
 
 ### Settings
 
