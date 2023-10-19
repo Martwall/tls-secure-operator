@@ -14,7 +14,7 @@ display-name: TLS Secure
 summary: Secure services with signed tls certificates
 
 description: |
-  Provides TLS certificates through a stand alone webserver and the tls-certificates interface.
+  Provides TLS certificates through the tls-certificates interface.
 
   Can be used either in a relationship with a proxy (currently only Haproxy) or by itself.
 

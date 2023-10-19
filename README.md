@@ -60,7 +60,7 @@ juju integrate tls-secure:signed-certificates your-charm:signed-certificates
 ```
 
 Please note that somehow the ACME server needs to be able to reach the standalone server in
-the charm. See [Allow incoming requests to the standalone server](#allow-incoming-requests-to-the-standalone-server).
+the charm. If not integrating with a reverse-proxy then you need to make sure that acme challenge will reach the charm in some other way. See [Allow incoming requests to the standalone server](#allow-incoming-requests-to-the-standalone-server).
 
 ### Settings
 

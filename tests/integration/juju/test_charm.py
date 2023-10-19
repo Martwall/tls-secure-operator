@@ -111,7 +111,7 @@ async def deploy_dev_requirer(charm: Path, model: Model) -> Application:
     requirer_app: Application = await model.deploy(
         charm, num_units=1, application_name=REQUIRER_APP_NAME
     )
-    await model.block_until(lambda: requirer_app.status in ("active", "error"), timeout=180)
+    await model.block_until(lambda: requirer_app.status in ("active", "error"), timeout=600)
 
     assert requirer_app.status == "active"
     return requirer_app
@@ -121,7 +121,7 @@ async def add_machine_for_tls_secure(model: Model) -> Machine:
     """Needed for the acme.sh curl invocation to trust the self-signed certificates of the pebble dev server."""
     # Add a machine before so that certificates can be transferred to it
     machine: Machine = await model.add_machine()
-    await model.block_until(lambda: machine.hostname is not None, timeout=160)
+    await model.block_until(lambda: machine.hostname is not None, timeout=600)
     lxd_instance_name = machine.hostname
     logger.info(lxd_instance_name)
     lxd_tasks(lxd_instance_name)
@@ -278,9 +278,17 @@ async def test_connection_with_haproxy_when_no_relation_from_start(
     await ops_test.model.wait_for_idle(apps=[tls_secure_app.entity_id, requirer_app.entity_id])
     # assert tls_secure_app.status == "waiting"
     async with ops_test.fast_forward(fast_interval="30s"):
-        # When the relation is established the certificate should be issued
+        # When the proxy relation is established the certificate should be issued
         await ops_test.model.add_relation(tls_secure_app.entity_id, haproxy_app.entity_id)
         await ops_test.model.wait_for_idle(apps=[tls_secure_app.entity_id, haproxy_app.entity_id])
+        tls_secure_status_message: str = tls_secure_app.units[0].workload_status_message
+        timeout = 60
+        timeout_count = 0
+        while not "certificate created" in tls_secure_status_message.lower():
+            await asyncio.sleep(1)
+            timeout_count += 1
+            if timeout_count == timeout:
+                break
 
     verify_certificates_created(tls_secure_app.units[0], requirer_app.units[0])
 
@@ -303,30 +311,6 @@ def verify_certificates_created(tls_secure_unit: Unit, requirer_unit: Unit) -> N
     certificates = requirer_relation_data["application_data"]["certificates"]
     assert isinstance(certificates, str)
     assert len(certificates) > 0
-
-
-@pytest_asyncio.fixture(scope="module")
-async def test_fixture() -> str:
-    logger.info(f"Fixture time: {datetime.datetime.now()}")
-    await asyncio.sleep(5)
-    return "hello"
-
-
-@pytest.mark.skip
-@pytest.mark.asyncio
-async def test_async_fixture(ops_test: OpsTest, test_fixture: str):
-    """Some other test."""
-    logger.info(f"test_async_fixture: {datetime.datetime.now()}")
-    assert test_fixture == "hello"
-
-
-@pytest.mark.skip
-@pytest.mark.asyncio
-async def test_async_fixture_2(ops_test: OpsTest, test_fixture: str):
-    """Some other test."""
-    logger.info(f"test_async_fixture_2: {datetime.datetime.now()}")
-    assert test_fixture == "hello"
-
 
 def relation_inspect(unit_name: str, related_unit_name: str, endpoint: str) -> dict:
     """Get the relation data.
