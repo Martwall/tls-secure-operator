@@ -3,7 +3,6 @@
 # See LICENSE file for licensing details.
 
 import asyncio
-import datetime
 import json
 import logging
 import os
@@ -284,7 +283,7 @@ async def test_connection_with_haproxy_when_no_relation_from_start(
         tls_secure_status_message: str = tls_secure_app.units[0].workload_status_message
         timeout = 60
         timeout_count = 0
-        while not "certificate created" in tls_secure_status_message.lower():
+        while "certificate created" not in tls_secure_status_message.lower():
             await asyncio.sleep(1)
             timeout_count += 1
             if timeout_count == timeout:
@@ -311,6 +310,7 @@ def verify_certificates_created(tls_secure_unit: Unit, requirer_unit: Unit) -> N
     certificates = requirer_relation_data["application_data"]["certificates"]
     assert isinstance(certificates, str)
     assert len(certificates) > 0
+
 
 def relation_inspect(unit_name: str, related_unit_name: str, endpoint: str) -> dict:
     """Get the relation data.
