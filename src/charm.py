@@ -3,7 +3,7 @@
 # See LICENSE file for licensing details.
 #
 # Learn more at: https://juju.is/docs/sdk
-"""This is a docstring."""
+"""Charm implementation."""
 
 import logging
 from os import environ, path, remove
@@ -673,6 +673,8 @@ class TlsSecureOperatorCharm(CharmBase):
 
     def _on_haproxy_relation_joined(self, event: RelationJoinedEvent) -> None:
         """Update the reverse proxy relation data when joining the relation."""
+        if not self.model.unit.is_leader():
+            return
         self._update_haproxy_relation_data()
 
     def _should_update_haproxy_relation_data(self) -> bool:
