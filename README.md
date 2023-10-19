@@ -12,7 +12,7 @@ Use links instead.
 
 Charmhub package name: tls-secure
 
-More information: https://charmhub.io/tls-secure
+More information: <https://charmhub.io/tls-secure>
 
 A charm to get signed certificates to protect (web) services. It attempts to integrate with reverse proxies in order to complete the http-01 challenge.
 Uses the "tls-certificates" interface and relation name "signed-certificates".
