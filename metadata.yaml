@@ -16,7 +16,7 @@ summary: Secure services with signed tls certificates
 description: |
   Provides TLS certificates through the tls-certificates interface.
 
-  Can be used either in a relationship with a proxy (currently only Haproxy) or by itself.
+  Can be used either in a relationship with a proxy (currently only Haproxy support) or by itself.
 
   This is for charms needing signed TLS certificates for their web services.
 
