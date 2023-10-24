@@ -10,6 +10,8 @@ Use links instead.
 
 # tls-secure-operator
 
+[![TLS Secure](https://charmhub.io/tls-secure/badge.svg)](https://charmhub.io/tls-secure)
+
 Charmhub package name: tls-secure
 
 More information: <https://charmhub.io/tls-secure>
