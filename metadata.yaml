@@ -23,11 +23,11 @@ description: |
   Uses acme.sh under the hood for certificate handling.
 
 maintainers:
-  - Martwall
+  - Martwall <m3ojcajg@duck.com>
 
 source: https://github.com/Martwall/tls-secure-operator
 issues: https://github.com/Martwall/tls-secure-operator/issues
-website: https://charmhub.io/tls-secure
+website: https://github.com/Martwall/tls-secure-operator
 
 docs: https://discourse.charmhub.io/t/tls-secure-docs-index/12198
 
