@@ -8,11 +8,11 @@ Avoid using this README file for information that is maintained or published els
 Use links instead.
 -->
 
-# tls-secure-operator
+# tlss-operator
 
-Charmhub package name: tls-secure
+Charmhub package name: tlss
 
-More information: <https://charmhub.io/tls-secure>
+More information: <https://charmhub.io/tlss>
 
 A charm to get signed certificates to protect (web) services. It attempts to integrate with reverse proxies in order to complete the http-01 challenge.
 Uses the "tls-certificates" interface and relation name "signed-certificates".
@@ -46,17 +46,17 @@ Use the charms.tls_certificates_interface.v2.tls_certificates lib to handle the 
 On juju command line when using Haproxy as the proxy service:
 
 ```shell
-juju deploy tls-secure --config email=email_for_cert_expiry_notifications@example.com
+juju deploy tlss --config email=email_for_cert_expiry_notifications@example.com
 juju deploy haproxy --config services=""
-juju integrate tls-secure:haproxy haproxy:reverseproxy
-juju integrate tls-secure:signed-certificates your-charm:signed-certificates
+juju integrate tlss:haproxy haproxy:reverseproxy
+juju integrate tlss:signed-certificates your-charm:signed-certificates
 ```
 
 On juju command line when not using a proxy service:
 
 ```shell
-juju deploy tls-secure --config email=email_for_cert_expiry_notifications@example.com --config proxy-service=none
-juju integrate tls-secure:signed-certificates your-charm:signed-certificates
+juju deploy tlss --config email=email_for_cert_expiry_notifications@example.com --config proxy-service=none
+juju integrate tlss:signed-certificates your-charm:signed-certificates
 ```
 
 Please note that somehow the ACME server needs to be able to reach the standalone server in
@@ -86,7 +86,7 @@ csr = generate_csr(private_key=private_key, subject=subject, sans_dns=sans_dns)
 
 The charm uses http-01 challenge and for this to succeed there needs to be a way for the CA to reach the standalone server that acme.sh spins up as part of the signing process. The server listens on port 80 (not yet configurable). This means that if not used with a local ACME server, the domain name in the csr for which a certificate is requested needs to be set so that a request will reach the standalone ACME server. This means that when using proxy mode a record should be added at your dns provider that points to the proxy instance or is somehow able to reach it. When not using proxy mode there needs to be a way for the ACME server to reach the standalone server in the charm directly.
 
-When using a proxy-service with the charm, for example "haproxy" the tls-secure charm automatically adds a listener service on port 80 that forwards acme challenges to itself and
+When using a proxy-service with the charm, for example "haproxy" the tlss charm automatically adds a listener service on port 80 that forwards acme challenges to itself and
 redirects all other requests to https (port 443). This means that your charm only has to configure the https service. See config.yaml for more information.
 
 For example using Haproxy in front of a webservice it could look something like this:
