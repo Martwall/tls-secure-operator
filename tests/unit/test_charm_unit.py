@@ -22,7 +22,7 @@ from charms.tls_certificates_interface.v2.tls_certificates import (
 logger = logging.getLogger(__name__)
 
 
-LXC_TEST_INSTANCE_NAME = "test-tlss-operator-UStJX1kdja3n0qoRlKWzog"
+LXC_TEST_INSTANCE_NAME = "test-tls-secure-operator-UStJX1kdja3n0qoRlKWzog"
 TEMPORARY_DIR_TEST_PATH = "./tests/unit/tmp-test"
 
 
@@ -37,8 +37,8 @@ class TestCharm(unittest.TestCase):
         # self.patcher = patch.object(TlsSecureOperatorCharm, "ingress_address", return_value="1.2.3.4")
         # self.mock_ingress_address = MagicMock(spec=TlsSecureOperatorCharm, ingress_address="1.2.3.4")
         self.harness = ops.testing.Harness(TlsSecureOperatorCharm)
-        self.harness.set_model_name("testing-tlss-operator")
-        self.harness.model.unit.name = "tlss/0"
+        self.harness.set_model_name("testing-tls-secure-operator")
+        self.harness.model.unit.name = "tls-secure/0"
         self.relation_name = "signed-certificates"
         self.remote_app = "signed-certs-requirer"
         self.remote_unit_name = "signed-certs-requirer/0"
@@ -122,7 +122,7 @@ class TestCharm(unittest.TestCase):
         self.harness.update_config(
             {
                 "use-email": True,
-                "email": "some_email+tlss@example.com",
+                "email": "some_email+tls-secure@example.com",
                 "server": "https://dv.acme-v02.api.pki.goog/directory",
                 "eab-kid": "some-eab-kid",
                 "eab-hmac-key": "some-hmac-key",

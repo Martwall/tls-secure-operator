@@ -3,12 +3,12 @@
 
 # The charm package name, no spaces (required)
 # See https://juju.is/docs/sdk/naming#heading--naming-charms for guidance.
-name: tlss
+name: tls-secure
  
 # The following metadata are human-readable and will be published prominently on Charmhub.
 
 # (Recommended)
-display-name: TLSS
+display-name: TLS Secure
 
 # (Required)
 summary: Secure services with signed tls certificates
@@ -25,11 +25,11 @@ description: |
 maintainers:
   - Martwall <m3ojcajg@duck.com>
 
-source: https://github.com/Martwall/tlss-operator
-issues: https://github.com/Martwall/tlss-operator/issues
-website: https://github.com/Martwall/tlss-operator
+source: https://github.com/Martwall/tls-secure-operator
+issues: https://github.com/Martwall/tls-secure-operator/issues
+website: https://github.com/Martwall/tls-secure-operator
 
-docs: https://discourse.charmhub.io/t/tlss-docs-index/12280
+docs: https://discourse.charmhub.io/t/tls-secure-docs-index/12198
 
 # Subordinate units inherit the public/private address of the principal application. The container of the principal defines the network setup.
 subordinate: false
