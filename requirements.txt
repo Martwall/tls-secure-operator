@@ -1,9 +1,6 @@
 ops >= 2.2.0
 jsonschema
 cryptography
-pylxd
 urllib3 < 2
 pem
-pytest
-pytest_operator
 pyopenssl
